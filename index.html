@@ -1,0 +1,1349 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Комплаенс-проверка контрагента — рабочее место</title>
+<style>
+  :root{
+    --paper:#eef0f4; --surface:#ffffff; --surface-2:#f6f7fa;
+    --ink:#1a1d26; --muted:#5b6270; --faint:#8b91a0;
+    --line:#d7dbe3; --line-strong:#c2c7d2;
+    --accent:#234b8a; --accent-ink:#1c3d70; --accent-soft:#e7eef8;
+    --good:#1c7a4d; --good-soft:#e2f2ea;
+    --warn:#8a5a10; --warn-soft:#f6ecd8;
+    --crit:#9e2a20; --crit-soft:#f7e4e2;
+    --serif:Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,"Liberation Mono",monospace;
+    --sh:0 1px 2px rgba(20,25,40,.05),0 6px 20px rgba(20,25,40,.05);
+    --radius:12px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --paper:#0f1218; --surface:#171b23; --surface-2:#1d222c;
+      --ink:#e7eaf1; --muted:#9aa2b3; --faint:#6b7384;
+      --line:#2a2f3b; --line-strong:#3a414f;
+      --accent:#7ea6e8; --accent-ink:#9cbcf0; --accent-soft:#1a2740;
+      --good:#57c48b; --good-soft:#132a20;
+      --warn:#d3a24e; --warn-soft:#2c2412;
+      --crit:#e6796d; --crit-soft:#2e1715;
+      --sh:0 1px 2px rgba(0,0,0,.3),0 8px 26px rgba(0,0,0,.32);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0f1218; --surface:#171b23; --surface-2:#1d222c;
+    --ink:#e7eaf1; --muted:#9aa2b3; --faint:#6b7384;
+    --line:#2a2f3b; --line-strong:#3a414f;
+    --accent:#7ea6e8; --accent-ink:#9cbcf0; --accent-soft:#1a2740;
+    --good:#57c48b; --good-soft:#132a20;
+    --warn:#d3a24e; --warn-soft:#2c2412;
+    --crit:#e6796d; --crit-soft:#2e1715;
+    --sh:0 1px 2px rgba(0,0,0,.3),0 8px 26px rgba(0,0,0,.32);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:15px; line-height:1.5;
+    -webkit-text-size-adjust:100%;
+  }
+  a{color:var(--accent)}
+  h1,h2,h3{font-family:var(--serif); font-weight:600; line-height:1.25; margin:0}
+  h1{font-size:21px}
+  h2{font-size:18px; margin-bottom:10px}
+  h3{font-size:15px; font-family:var(--sans); font-weight:650; margin-bottom:6px}
+  .wrap{max-width:1180px; margin:0 auto; padding:0 16px 80px}
+
+  /* ---- шапка ---- */
+  header.top{
+    position:sticky; top:0; z-index:40;
+    background:var(--surface); border-bottom:1px solid var(--line);
+    box-shadow:var(--sh);
+  }
+  .top-in{max-width:1180px;margin:0 auto;padding:10px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .brand{display:flex;flex-direction:column;gap:1px;margin-right:auto}
+  .brand small{color:var(--faint);font-size:11.5px;letter-spacing:.02em}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap}
+  .tab{
+    border:1px solid var(--line); background:var(--surface-2); color:var(--muted);
+    padding:6px 13px; border-radius:999px; cursor:pointer; font-size:13.5px; font-family:inherit;
+  }
+  .tab[aria-selected="true"]{background:var(--accent); border-color:var(--accent); color:#fff}
+  .icon-btn{
+    border:1px solid var(--line); background:var(--surface-2); color:var(--muted);
+    width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:15px;line-height:1
+  }
+
+  /* ---- сетка ---- */
+  .cols{display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:18px; align-items:start; margin-top:18px}
+  @media (max-width:960px){ .cols{grid-template-columns:minmax(0,1fr)} .side{position:static !important} }
+
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--sh); padding:16px 18px; margin-bottom:14px}
+  .card > .hd{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .card > .hd .ref{color:var(--faint);font-size:12px}
+  .side{position:sticky; top:64px}
+
+  /* ---- формы ---- */
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  label.f{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+  input[type=text],input[type=number],input[type=date],select,textarea{
+    font:inherit; font-size:14px; color:var(--ink); background:var(--surface-2);
+    border:1px solid var(--line); border-radius:8px; padding:7px 9px; width:100%;
+  }
+  textarea{min-height:64px;resize:vertical;line-height:1.45}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft); border-color:var(--accent)}
+  .chk{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--ink);padding:5px 0;cursor:pointer}
+  .chk input{margin-top:3px;flex:0 0 auto;accent-color:var(--accent)}
+  .hint{color:var(--faint);font-size:12px;margin-top:4px}
+  .btn{
+    font:inherit;font-size:13.5px;border-radius:9px;padding:8px 14px;cursor:pointer;
+    border:1px solid var(--line-strong); background:var(--surface-2); color:var(--ink);
+  }
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.ghost{background:transparent}
+  .btn.danger{color:var(--crit);border-color:var(--crit)}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+
+  /* ---- бейджи ---- */
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .b-base{background:var(--good-soft);color:var(--good)}
+  .b-std{background:var(--warn-soft);color:var(--warn)}
+  .b-deep{background:var(--crit-soft);color:var(--crit)}
+  .b-off{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+  .b-acc{background:var(--accent-soft);color:var(--accent-ink)}
+
+  /* ---- сводка ---- */
+  .sum-line{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .sum-line:last-child{border-bottom:0}
+  .sum-line span:first-child{color:var(--muted)}
+  .sum-line span:last-child{text-align:right;font-weight:600}
+  .verdict{border-radius:10px;padding:11px 13px;margin-bottom:12px;font-size:13.5px;line-height:1.45}
+  .v-ok{background:var(--good-soft);color:var(--good)}
+  .v-cond{background:var(--warn-soft);color:var(--warn)}
+  .v-neg{background:var(--crit-soft);color:var(--crit)}
+  .v-off{background:var(--surface-2);color:var(--muted)}
+  .verdict b{display:block;font-size:14.5px;margin-bottom:3px}
+
+  /* ---- шаги ---- */
+  .steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .step{
+    border:1px solid var(--line);background:var(--surface);border-radius:9px;
+    padding:7px 12px;font-size:13px;cursor:pointer;color:var(--muted);display:flex;gap:7px;align-items:center;font-family:inherit
+  }
+  .step[aria-current="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+  .step .num{
+    display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;border-radius:50%;
+    background:var(--surface-2);border:1px solid var(--line);font-size:11px;font-weight:700
+  }
+  .step[aria-current="true"] .num{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .step.done .num{background:var(--good-soft);color:var(--good);border-color:var(--good-soft)}
+
+  /* ---- чек-лист ---- */
+  .ci{border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:9px;background:var(--surface-2)}
+  .ci.f-flag{border-color:var(--warn);background:var(--warn-soft)}
+  .ci.f-over{border-color:var(--crit);background:var(--crit-soft)}
+  .ci.f-abs{border-color:var(--crit);background:var(--crit-soft);box-shadow:inset 3px 0 0 var(--crit)}
+  .ci .ci-hd{display:flex;gap:9px;align-items:baseline}
+  .ci .n{font-family:var(--mono);font-size:12px;color:var(--faint);flex:0 0 26px}
+  .ci .what{font-size:13.5px;flex:1}
+  .ci .src{font-size:11.5px;color:var(--faint);margin:5px 0 8px 35px}
+  .ci .ctl{display:flex;gap:6px;flex-wrap:wrap;margin-left:35px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .seg label{padding:4px 9px;font-size:12px;cursor:pointer;color:var(--muted);border-right:1px solid var(--line)}
+  .seg label:last-child{border-right:0}
+  .seg input{position:absolute;opacity:0;pointer-events:none}
+  .seg input:checked + span{font-weight:700}
+  .seg label:has(input:checked){background:var(--accent-soft);color:var(--accent-ink)}
+  .seg label.w:has(input:checked){background:var(--warn-soft);color:var(--warn)}
+  .seg label.c:has(input:checked){background:var(--crit-soft);color:var(--crit)}
+  .ci textarea{margin:8px 0 0 35px;width:calc(100% - 35px);min-height:44px;font-size:13px;background:var(--surface)}
+  .need{color:var(--crit);font-size:11.5px;margin:4px 0 0 35px}
+
+  /* ---- таблицы ---- */
+  table.t{width:100%;border-collapse:collapse;font-size:13px}
+  table.t th,table.t td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+  table.t th{background:var(--surface-2);font-weight:650;font-size:12.5px}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  tr.exp{background:var(--crit-soft)}
+
+  ul.tight{margin:6px 0 0;padding-left:20px}
+  ul.tight li{margin-bottom:4px;font-size:13.5px}
+  .muted{color:var(--muted)}
+  .small{font-size:12.5px}
+  .sep{height:1px;background:var(--line);margin:14px 0}
+  .pill{display:inline-block;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:12px;font-family:var(--mono)}
+  .hidden{display:none !important}
+  .doc{font-family:var(--serif);font-size:14px;line-height:1.5}
+  .doc h4{font-family:var(--sans);font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 6px}
+  .toast{
+    position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+    background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:9px;font-size:13.5px;
+    z-index:99;box-shadow:var(--sh);opacity:0;pointer-events:none;transition:opacity .18s
+  }
+  .toast.on{opacity:1}
+
+  @media print{
+    header.top,.steps,.side,.btnrow,.noprint{display:none !important}
+    body{background:#fff;color:#000}
+    .card{border:0;box-shadow:none;padding:0;margin:0}
+    .wrap{max-width:none;padding:0}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <h1>Комплаенс-проверка контрагента</h1>
+      <small>Стадия 0 договорной работы · ГК «С.АН ГРУПП»</small>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-view="check" aria-selected="true">Проверка</button>
+      <button class="tab" role="tab" data-view="registry" aria-selected="false">Реестр</button>
+      <button class="tab" role="tab" data-view="orgs" aria-selected="false">Пороги</button>
+      <button class="tab" role="tab" data-view="help" aria-selected="false">Справка</button>
+    </div>
+    <button class="icon-btn" id="theme" title="Тема">◐</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============ ПРОВЕРКА ============ -->
+<div id="v-check">
+  <div class="steps" id="steps"></div>
+  <div class="cols">
+    <div>
+      <section id="s1" class="stepbody"></section>
+      <section id="s2" class="stepbody hidden"></section>
+      <section id="s3" class="stepbody hidden"></section>
+      <section id="s4" class="stepbody hidden"></section>
+      <section id="s5" class="stepbody hidden"></section>
+    </div>
+    <aside class="side" id="side"></aside>
+  </div>
+</div>
+
+<!-- ============ РЕЕСТР ============ -->
+<div id="v-registry" class="hidden"></div>
+
+<!-- ============ ПОРОГИ ============ -->
+<div id="v-orgs" class="hidden"></div>
+
+<!-- ============ СПРАВКА ============ -->
+<div id="v-help" class="hidden"></div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ======================================================================
+   Данные Регламента о порядке проведения комплаенс-проверки контрагентов
+   (проверки должной осмотрительности) в ГК «С.АН ГРУПП».
+   Все ссылки на пункты и приложения — на этот Регламент.
+   ====================================================================== */
+
+const LS = {orgs:'kpk.orgs.v1', reg:'kpk.registry.v1', draft:'kpk.draft.v1', theme:'kpk.theme'};
+
+/* Приложение № 2 — пороговые значения. В коде не хранятся:
+   вносятся на вкладке «Пороги» и остаются в браузере пользователя. */
+const ORGS_DEFAULT = [];
+
+/* Предмет договора. lvl — минимальный уровень по Приложению № 1;
+   sk — строительный блок (п. 4.6: проверка независимо от суммы, уровень не ниже стандартного). */
+const SUBJECTS = [
+  {v:'postavka-raz', t:'Разовая поставка ТМЦ',                                   lvl:1, sk:false},
+  {v:'uslugi-prost', t:'Простые услуги',                                          lvl:1, sk:false},
+  {v:'postavka-reg', t:'Регулярные закупки, поставка материалов',                 lvl:2, sk:false},
+  {v:'oborud',       t:'Поставка оборудования',                                   lvl:2, sk:false, teh:true},
+  {v:'arenda',       t:'Аренда',                                                  lvl:2, sk:false},
+  {v:'uslugi',       t:'Возмездное оказание услуг, агентские, консультационные',  lvl:2, sk:false},
+  {v:'samozan',      t:'Договор с самозанятым или ИП',                            lvl:2, sk:false},
+  {v:'podryad',      t:'Генподряд, подряд, субподряд, СМР',                       lvl:2, sk:true,  teh:true},
+  {v:'proekt',       t:'Проектные и изыскательские работы',                       lvl:2, sk:true,  teh:true},
+  {v:'tehzak',       t:'Функции технического заказчика',                          lvl:2, sk:true,  teh:true},
+  {v:'nedvizh', noPorog:true,      t:'Купля-продажа недвижимости или земельного участка',       lvl:3, sk:false},
+  {v:'zaim', noPorog:true,         t:'Заём, кредит, залог, поручительство, уступка требования', lvl:3, sk:false},
+  {v:'sovm', noPorog:true,         t:'Совместная деятельность, инвестиционный договор',         lvl:3, sk:false},
+];
+
+/* Приложение № 5 — чек-лист комплаенс-проверки */
+const CHECKLIST = [
+  {n:1,  p:1, t:'Государственная регистрация, статус, дата создания, ОКВЭД, размер уставного капитала', s:'ЕГРЮЛ / ЕГРИП', u:'https://egrul.nalog.ru/'},
+  {n:2,  p:1, t:'Записи о недостоверности сведений (адрес, руководитель, участники)', s:'ЕГРЮЛ', u:'https://egrul.nalog.ru/'},
+  {n:3,  p:1, t:'Решение о предстоящем исключении из ЕГРЮЛ, о ликвидации, о реорганизации', s:'ЕГРЮЛ', u:'https://egrul.nalog.ru/'},
+  {n:4,  p:1, t:'Полномочия подписанта: устав, решение об избрании, доверенность, срок полномочий', s:'Документы контрагента', u:''},
+  {n:5,  p:1, t:'Необходимость корпоративного одобрения (крупная сделка, сделка с заинтересованностью) и его наличие', s:'Устав, отчётность контрагента', u:''},
+  {n:6,  p:1, t:'Дисквалификация руководителя; «массовые» руководители и учредители; адрес массовой регистрации', s:'«Прозрачный бизнес», реестр дисквалифицированных лиц', u:'https://pb.nalog.ru/'},
+  {n:7,  p:1, t:'Включение контрагента, его руководителя и участников в перечни Росфинмониторинга (экстремизм, терроризм, ФРОМУ)', s:'fedsfm.ru', u:'https://www.fedsfm.ru/'},
+  {n:8,  p:1, t:'Включение в санкционные перечни (при иностранном элементе и трансграничных расчётах)', s:'Открытые санкционные перечни, сведения банка', u:''},
+  {n:9,  p:1, t:'Судебные споры: количество, суммы, роль (истец / ответчик), споры по качеству и срокам', s:'kad.arbitr.ru, sudrf.ru', u:'https://kad.arbitr.ru/'},
+  {n:10, p:1, t:'Исполнительные производства: количество, суммы, предмет взыскания', s:'Банк данных исполнительных производств ФССП', u:'https://fssp.gov.ru/iss/ip'},
+  {n:11, p:1, t:'Дела о банкротстве, намерения кредиторов обратиться в суд', s:'ЕФРСБ', u:'https://bankrot.fedresurs.ru/'},
+  {n:12, p:1, t:'Существенные факты: залог долей, лизинг, изменение состава участников, уведомления кредиторов', s:'Федресурс', u:'https://fedresurs.ru/'},
+  {n:13, p:1, t:'Включение в реестр недобросовестных поставщиков', s:'ЕИС закупок', u:'https://zakupki.gov.ru/epz/dishonestsupplier/search/results.html'},
+  {n:14, p:1, t:'Обременения движимого имущества, передаваемого по договору', s:'Реестр уведомлений о залоге движимого имущества', u:'https://www.reestr-zalogov.ru/'},
+  {n:15, p:1, t:'Права на недвижимое имущество и обременения (для сделок с недвижимостью и аренды)', s:'Выписка из ЕГРН', u:'https://rosreestr.gov.ru/'},
+  {n:16, p:1, t:'Лицензии, членство в СРО, допуски, наличие записей в НРС', s:'Реестры СРО, НОСТРОЙ / НОПРИЗ, реестры лицензий', u:'https://nostroy.ru/'},
+  {n:17, p:1, t:'Аффилированность и конфликт интересов с организациями Группы, их участниками, руководителями и работниками', s:'ЕГРЮЛ, анкета, Реестр контрагентов', u:''},
+  {n:18, p:1, t:'Товарные знаки, права на результаты интеллектуальной деятельности (для лицензионных договоров)', s:'Реестры Роспатента', u:'https://rospatent.gov.ru/'},
+  {n:19, p:2, t:'Применяемый налоговый режим; статус плательщика НДС; соответствие выставляемых документов режиму', s:'Уведомление контрагента, декларации, «Прозрачный бизнес»', u:'https://pb.nalog.ru/', fin:true},
+  {n:20, p:2, t:'Задолженность по налогам, сборам и страховым взносам; отрицательное сальдо ЕНС', s:'Справка налогового органа, «Прозрачный бизнес»', u:'https://pb.nalog.ru/', fin:true},
+  {n:21, p:2, t:'Наличие решений о приостановлении операций по счетам', s:'Сервис ФНС «Сведения о приостановлениях по счетам»', u:'https://service.nalog.ru/bi.do', fin:true},
+  {n:22, p:2, t:'Среднесписочная численность работников; уплаченные налоги и страховые взносы; налоговая нагрузка', s:'«Прозрачный бизнес»', u:'https://pb.nalog.ru/', fin:true},
+  {n:23, p:2, t:'Финансовое состояние: выручка, прибыль (убыток), чистые активы, дебиторская и кредиторская задолженность, динамика за 3 года', s:'ГИР БО, отчётность контрагента', u:'https://bo.nalog.ru/', fin:true},
+  {n:24, p:2, t:'Соотношение цены договора с выручкой и активами контрагента', s:'Расчёт комплаенс-менеджера', u:'', fin:true},
+  {n:25, p:2, t:'Достаточность трудовых и производственных ресурсов для исполнения договора в заявленные сроки', s:'Анкета (форма Б), справка о численности и о МТБ', u:''},
+  {n:26, p:2, t:'Рыночность цены; для внутригрупповых сделок — принцип «вытянутой руки»', s:'Материалы инициатора, мнение финансового департамента', u:'', fin:true},
+  {n:27, p:2, t:'Допустимость и размер аванса, наличие лимита бюджета, источник финансирования, соответствие целевому назначению', s:'Мнение финансового департамента, условия кредитного договора', u:'', fin:true},
+  {n:28, p:2, t:'Информация о налоговых «разрывах» и рисках по цепочке с участием контрагента', s:'Требования, письма, информационные сообщения налогового органа', u:'', fin:true},
+];
+/* Приложение № 1 — проверяемые позиции по уровням */
+const SCOPE = {
+  1:[1,2,3,4,5,6,7,19,20,21],
+  2:[1,2,3,4,5,6,7,8,9,10,11,12,13,14,19,20,21,22,23,24],
+  3:Array.from({length:28},(_,i)=>i+1),
+};
+
+/* Приложение № 6, раздел 1 — критические факторы.
+   allow — допустимые квалификации, def — квалификация по умолчанию из Регламента. */
+const CRIT = [
+  {n:1,  t:'Запись о недостоверности сведений в ЕГРЮЛ',
+   q:'Красный флаг. В преодолимый стоп-фактор переводится только при невозможности подтвердить фактические сведения и идентифицировать контрагента либо его органы после дополнительного запроса.',
+   allow:['flag','over'], def:'flag'},
+  {n:2,  t:'Предстоящее исключение из ЕГРЮЛ, ликвидация, введение процедуры банкротства',
+   q:'Преодолимый стоп-фактор. Если юридическое лицо уже прекратило деятельность и исключено из ЕГРЮЛ — абсолютный стоп-фактор.',
+   allow:['over','abs'], def:'over'},
+  {n:3,  t:'Санкционные ограничения',
+   q:'Абсолютный стоп-фактор только в той части, в которой закон прямо запрещает сделку, требует блокирования (замораживания) либо делает расчёты юридически невозможными. Иные ограничения — красный флаг с проверкой банка и юридического департамента.',
+   allow:['flag','abs'], def:'flag'},
+  {n:4,  t:'Дисквалификация руководителя; признаки «массового» руководителя или учредителя',
+   q:'Красный флаг. Абсолютный стоп-фактор только если именно это лицо должно совершить юридически значимое действие в период дисквалификации. Признаки «массовости» сами по себе сделку не блокируют.',
+   allow:['flag','abs'], def:'flag'},
+  {n:5,  t:'Включение в реестр недобросовестных поставщиков',
+   q:'Красный флаг. Учитывается с анализом основания, давности и предмета закупки; для частной сделки само по себе не является абсолютным запретом.',
+   allow:['flag','over'], def:'flag'},
+  {n:6,  t:'Отсутствие обязательной лицензии, членства в СРО, допуска или иного разрешения по предмету договора',
+   q:'Абсолютный стоп-фактор, если исполнение договора без него не допускается законом.',
+   allow:['abs'], def:'abs'},
+  {n:7,  t:'Отсутствие полномочий у подписанта либо обязательного корпоративного одобрения',
+   q:'Абсолютный стоп-фактор до устранения, если без такого полномочия или одобрения сделка не может быть надлежащим образом заключена.',
+   allow:['abs'], def:'abs'},
+  {n:8,  t:'Отказ предоставить документы Блока А либо предоставление заведомо недостоверных сведений',
+   q:'Преодолимый стоп-фактор. При признаках подлога или невозможности достоверно идентифицировать контрагента комплаенс-менеджер вправе квалифицировать фактор как абсолютный до устранения.',
+   allow:['over','abs'], def:'over'},
+  {n:9,  t:'Неправомерное выставление НДС; сведения налогового органа о «разрывах»',
+   q:'Неправомерное выставление НДС — преодолимый стоп-фактор до корректировки документов или условий сделки. Сведения о «разрывах» — красный флаг, требующий налоговой митигации, но не автоматический запрет.',
+   allow:['flag','over'], def:'over'},
+  {n:10, t:'Приостановление операций по счетам',
+   q:'Красный флаг. Требует установления основания, суммы и влияния на исполнение договора; при невозможности расчётов по договору может быть квалифицировано как преодолимый стоп-фактор.',
+   allow:['flag','over'], def:'flag'},
+  {n:11, t:'Налоговая задолженность',
+   q:'Красный флаг. Оценивается с учётом размера, динамики, наличия рассрочки или оспаривания и соотношения с масштабом деятельности.',
+   allow:['flag','over'], def:'flag'},
+  {n:12, t:'Существенное превышение цены сделки над выручкой или активами контрагента',
+   q:'Красный флаг. Требует анализа ресурсов, субподряда и обеспечения. Комплаенс-менеджер указывает расчёт соотношения и обоснование; автоматическим стоп-фактором не является.',
+   allow:['flag','over'], def:'flag'},
+  {n:13, t:'Конфликт интересов, аффилированность',
+   q:'Преодолимый стоп-фактор при нераскрытом конфликте интересов. После полного раскрытия аффилированности, подтверждения рыночности условий и получения требуемых одобрений фактор может быть снят.',
+   allow:['flag','over'], def:'over'},
+];
+
+/* Приложение № 6, раздел 2 — красные флаги; m — группа мер митигации по п. 9.3 */
+const FLAGS = [
+  {n:1,  t:'Срок деятельности контрагента менее 12 месяцев; отсутствие подтверждённого опыта по предмету договора', m:'NEW'},
+  {n:2,  t:'Среднесписочная численность 0–1 человек при объёме работ, требующем большего персонала, либо отсутствие подтверждённого доступа к технике и ресурсам', m:'RES'},
+  {n:3,  t:'Основной ОКВЭД не соответствует предмету договора', m:'RES'},
+  {n:4,  t:'Адрес массовой регистрации; отсутствие контрагента по адресу', m:'TAX'},
+  {n:5,  t:'Частая смена руководителя, участников или наименования за последние 12 месяцев', m:'TAX'},
+  {n:6,  t:'Минимальный уставный капитал при цене сделки, несоразмерной финансовому масштабу контрагента', m:'SUD'},
+  {n:7,  t:'Убыток по итогам последнего отчётного года; отрицательные чистые активы; существенный рост кредиторской задолженности', m:'SUD'},
+  {n:8,  t:'Судебные споры и исполнительные производства, способные существенно повлиять на исполнение договора', m:'SUD'},
+  {n:9,  t:'Налоговая нагрузка или суммы уплаченных налогов существенно отклоняются от отраслевых ориентиров при значительных оборотах', m:'TAX'},
+  {n:10, t:'Цена сделки существенно ниже сопоставимых предложений, сметных нормативов или цен предыдущих закупок без объяснения', m:'TAX'},
+  {n:11, t:'Несоразмерный аванс, расчёты через третьих лиц, просьба об изменении реквизитов после подписания договора', m:'NEW'},
+  {n:12, t:'Совпадение IP-адресов, телефонов, адресов электронной почты с иными контрагентами или организациями Группы', m:'TAX'},
+  {n:13, t:'Признаки «дробления бизнеса» в группе контрагента', m:'TAX'},
+  {n:14, t:'Наличие иностранного элемента, трансграничных платежей, расчётов через юрисдикции с ограничениями', m:'FOR'},
+  {n:15, t:'Негативная информация в открытых источниках и СМИ о деловой репутации контрагента', m:'SUD'},
+];
+
+/* п. 9.3 — рекомендуемые меры снижения риска */
+const MIT = {
+  NEW:'Отказ от авансирования либо аванс не более 10 % под банковскую гарантию или поручительство участника контрагента; поэтапная приёмка и оплата; сокращённый срок договора; право на односторонний отказ.',
+  RES:'Согласование привлекаемых субподрядчиков с проведением их проверки; справка о численности привлекаемого персонала по должностям и документы о технике; усиленный строительный контроль.',
+  TAX:'Обязательная налоговая оговорка — заверения об обстоятельствах по ст. 431.2 ГК РФ и возмещение имущественных потерь по ст. 406.1 ГК РФ с правом зачёта. Дополнительные налоговые документы — только по мотивированному требованию при конкретном риске.',
+  SUD:'Обеспечение исполнения (банковская гарантия, залог, поручительство); оплата по факту; запрет уступки прав по договору без согласия.',
+  AFF:'Раскрытие конфликта интересов; согласование сделки уполномоченным лицом; подтверждение рыночности цены финансовым департаментом; при необходимости — корпоративное одобрение.',
+  FOR:'Проверка по санкционным перечням и требованиям валютного законодательства; согласование схемы расчётов с обслуживающим банком до подписания договора.',
+};
+
+/* Приложение № 7, раздел 5 — обязательные к включению в договор условия */
+const TERMS = [
+  'Налоговая оговорка (ст. 431.2, 406.1 ГК РФ) с правом зачёта',
+  'Ограничение аванса',
+  'Обеспечение исполнения (банковская гарантия, поручительство, залог, удержание)',
+  'Поэтапная приёмка и оплата по факту выполнения',
+  'Согласование субподрядчиков с проведением их проверки',
+  'Право на односторонний отказ от договора при выявлении рисков',
+  'Запрет уступки прав требования без письменного согласия',
+  'Иные условия',
+];
+
+/* Приложение № 3 — истребуемые документы */
+const DOCS = {
+  A:[
+   'Краткая анкета контрагента — форма А (Приложение № 4)',
+   'Карточка организации с банковскими реквизитами — если реквизиты не указаны в проекте договора',
+   'Доверенность на подписанта — только если договор подписывает не лицо из ЕГРЮЛ (ЕГРИП)',
+   'Уведомление о применяемом налоговом режиме — только если контрагент не плательщик НДС либо применяет спецрежим',
+  ],
+  B:[
+   'Расширенная анкета контрагента — форма Б (Приложение № 4)',
+   'Решение (протокол) о назначении единоличного исполнительного органа — если срок полномочий не подтверждается ЕГРЮЛ и уставом',
+   'Устав в действующей редакции — только если копия недоступна в реестре ФНС либо содержит ограничения полномочий',
+   'Справка об исполнении обязанности по уплате налогов либо о сальдо ЕНС — при налоговых красных флагах или по мотивированному запросу',
+   'Декларация по НДС за последний квартал (титульный лист и раздел 1) с квитанцией — только при углублённой проверке либо конкретных налоговых флагах',
+   'Документ о правах на помещение по адресу деятельности — только при признаках недостоверности адреса',
+   'Лицензии, свидетельства, сертификаты, разрешения — только если сведений нет в открытых реестрах',
+   'Сведения об участниках с долей более 25 % — только если их нет в ЕГРЮЛ',
+  ],
+  V:[
+   'Выписка из реестра членов СРО сроком не более 1 месяца — для СМР, проектных и изыскательских работ',
+   'Подтверждение наличия специалистов в НРС: количество и номера реестровых записей, без персональных данных',
+   'Справка о материально-технической базе с указанием прав (собственность, аренда, лизинг)',
+   'Справка о численности персонала по категориям, без персональных данных работников',
+   'Референс-лист: исполненные аналогичные договоры за 3 года с контактами заказчиков',
+   'Расшифровка дебиторской и кредиторской задолженности — если по ГИР БО есть признаки финансовой неустойчивости',
+   'Сведения о привлекаемых субподрядчиках с указанием предмета и доли работ',
+   'Подтверждение согласия на включение в договор налоговой оговорки',
+  ],
+};
+
+const LVL_NAME = {1:'Базовый', 2:'Стандартный', 3:'Углублённый'};
+const LVL_CLASS = {1:'b-base', 2:'b-std', 3:'b-deep'};
+const LVL_DAYS  = {1:1, 2:2, 3:5};
+const LVL_OPIN  = {1:'по запросу, параллельно', 2:'до 1 р.д., параллельно', 3:'до 2 р.д., параллельно'};
+const LVL_VALID = {1:12, 2:12, 3:6};
+
+/* ====================== состояние ====================== */
+const blank = () => ({
+  id:'', num:'', date:today(),
+  org:(ORGS[0] ? ORGS[0].id : 0), cp:'', inn:'', ogrn:'', subj:'podryad', sum:'', vat:true,
+  pay:'fact', avans:'', fin:'own',
+  age:'>3', hist:'new', initiator:'', reason:'new',
+  intragroup:false, affil:false, foreign:false, noexp:false,
+  excl:'', p46:[], km:'',
+  lvlManual:0, lvlWhy:'',
+  cl:{}, crit:{}, flags:[], mitig:{}, terms:{}, concl:'', decision:'',
+  monitor:'',
+});
+let ORGS = load(LS.orgs) || ORGS_DEFAULT.map(o=>({...o}));
+let S = load(LS.draft) || blank();
+if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
+let REG = load(LS.reg) || [];
+let step = 1;
+let view = 'check';
+
+/* ====================== утилиты ====================== */
+function load(k){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
+function save(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function today(){ const d=new Date(); return d.toISOString().slice(0,10); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function money(n){ n = Number(n)||0; return n.toLocaleString('ru-RU'); }
+function rus(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}.${m}.${y}`; }
+const ORG_STUB = {id:0, name:'— организация не выбрана —', inn:'', role:'', porog:0, base:0, std:0, prikaz:''};
+function org(){ return ORGS.find(o=>o.id==S.org) || ORGS[0] || ORG_STUB; }
+function subj(){ return SUBJECTS.find(x=>x.v===S.subj) || SUBJECTS[0]; }
+function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('on'),1900); }
+function addMonths(iso,m){ const d=new Date(iso); d.setMonth(d.getMonth()+m); return d.toISOString().slice(0,10); }
+function copy(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>toast('Скопировано в буфер обмена'), ()=>fallbackCopy(text));
+  } else fallbackCopy(text);
+}
+function fallbackCopy(text){
+  const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); toast('Скопировано в буфер обмена'); }catch(e){ toast('Скопировать не удалось'); }
+  document.body.removeChild(ta);
+}
+function download(name, text, mime){
+  try{
+    const b=new Blob(['﻿'+text],{type:mime||'text/plain;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},400);
+  }catch(e){ toast('Скачивание недоступно — используйте копирование'); }
+}
+
+/* ====================== расчёт по Регламенту ====================== */
+function calc(){
+  const o = org(), sj = subj();
+  const sum = Number(S.sum)||0;
+  const avans = Number(S.avans)||0;
+  const r = {org:o, subj:sj, sum, avans};
+
+  /* --- нужна ли проверка (пп. 4.5–4.7) --- */
+  r.p46 = [];
+  if(sj.sk) r.p46.push('Подрядные, строительно-монтажные, проектные и изыскательские работы, функции техзаказчика — проверка независимо от суммы (п. 4.6)');
+  (S.p46||[]).forEach(k=>r.p46.push(k));
+
+  r.excl = S.excl || '';
+  r.skip = false; r.skipWhy = '';
+  if(r.excl && !r.p46.length){
+    r.skip = true;
+    r.skipWhy = r.excl === 'intragroup'
+      ? 'Внутригрупповая сделка (пп. 4 п. 4.7). Проверка не проводится; комплаенс-менеджер с привлечением финансового департамента подтверждает соответствие цены принципу «вытянутой руки» и оформляет Заключение в сокращённой форме.'
+      : 'Сделка отнесена к исключениям п. 4.7. Основание фиксируется инициатором в листе согласования со ссылкой на подпункт п. 4.7 и приказ организации об установлении порогов.';
+  } else if(!r.p46.length && sum <= o.porog){
+    const payOk = (S.pay === 'fact' || S.pay === 'cp-prepay') && !sj.noPorog;
+    if(sj.noPorog){
+      r.condSkip = 'Сумма не превышает порог, но исключение пп. 1 п. 4.7 к такой сделке неприменимо: оно обусловлено оплатой по факту поставки (выполнения) либо предоплатой со стороны контрагента, а по займу, залогу, поручительству, уступке, сделке с недвижимостью и совместной деятельности такое условие не устанавливается. Проверка проводится.';
+    }
+    if(payOk){
+      r.skip = true;
+      r.skipWhy = `Сумма ${money(sum)} ₽ не превышает порог проверки ${money(o.porog)} ₽ для ${o.name}, оплата — ${S.pay==='fact'?'по факту':'предоплата со стороны контрагента'} (пп. 1 п. 4.7).`;
+    } else {
+      r.condSkip = `Сумма не превышает порог, но условие пп. 1 п. 4.7 не выполнено: предусмотрен аванс со стороны организации Группы. Проверка проводится.`;
+    }
+  }
+
+  /* --- уровень риска (Приложение № 1, пп. 5.2–5.3) --- */
+  const parts = [];
+  let bySum = 1;
+  if(sum > o.std) bySum = 3; else if(sum > o.base) bySum = 2; else bySum = 1;
+  parts.push({k:'Сумма сделки', v:bySum, note:`${money(sum)} ₽ при границах ${money(o.base)} / ${money(o.std)} ₽`});
+  parts.push({k:'Предмет договора', v:sj.lvl, note:sj.t});
+  const byHist = S.hist==='>2' ? 1 : (S.hist==='0.5-2' ? 2 : 3);
+  parts.push({k:'История сотрудничества', v:byHist, note:{'>2':'Более 2 лет без замечаний','0.5-2':'От 6 месяцев до 2 лет','new':'Новый контрагент либо замечания по исполнению'}[S.hist]});
+  const byAge = S.age==='>3' ? 1 : (S.age==='1-3' ? 2 : 3);
+  parts.push({k:'Срок деятельности', v:byAge, note:{'>3':'Более 3 лет','1-3':'От 1 года до 3 лет','<1':'Менее 1 года'}[S.age]});
+  let byPay = 1;
+  if(S.fin==='project') byPay = 3; else if(avans > 30) byPay = 3; else if(avans > 0) byPay = 2;
+  parts.push({k:'Расчёты', v:byPay, note:(S.fin==='project'?'Проектное финансирование; ':'') + (avans>0?`аванс ${avans} %`:'оплата по факту / постоплата')});
+
+  let lvl = Math.max(...parts.map(p=>p.v));
+  const forced = [];
+  if(sj.sk && lvl < 2){ lvl = 2; forced.push('Подрядные, СМР, проектные и изыскательские работы, техзаказчик — уровень не ниже стандартного (п. 4.6)'); }
+
+  /* п. 5.3 — углублённый независимо от суммы */
+  const p53 = [];
+  if(sj.sk && sum > o.base) p53.push(`СМР, проектирование, изыскания или функции техзаказчика при сумме свыше верхней границы базового уровня (${money(o.base)} ₽)`);
+  if(S.fin==='project') p53.push('Оплата за счёт средств целевого банковского кредита (проектного финансирования)');
+  if(avans > 30) p53.push('Авансирование свыше 30 % цены договора');
+  if(S.age==='<1') p53.push('Контрагент зарегистрирован менее 12 месяцев назад');
+  if(S.noexp) p53.push('Отсутствие подтверждённого опыта по предмету договора');
+  if(S.affil) p53.push('Взаимозависимость или аффилированность с организацией Группы, её участниками или руководителями');
+  if(S.foreign) p53.push('Сделка с иностранным элементом либо трансграничные платежи');
+  const nFlags = (S.flags||[]).length;
+  if(nFlags >= 2) p53.push(`Выявлено ${nFlags} красных флага (два и более)`);
+  if(p53.length){ lvl = 3; }
+  r.p53 = p53;
+  r.forced = forced;
+  r.parts = parts;
+
+  r.lvlAuto = lvl;
+  r.lvl = Math.max(lvl, Number(S.lvlManual)||0);
+  r.raised = r.lvl > r.lvlAuto;
+
+  /* --- объём и сроки --- */
+  r.scope   = SCOPE[r.lvl];
+  r.days    = LVL_DAYS[r.lvl];
+  r.opinion = LVL_OPIN[r.lvl];
+  r.valid   = LVL_VALID[r.lvl];
+  r.anketa  = r.lvl === 1 ? 'Форма А (краткая)' : 'Форма Б (расширенная)';
+  r.blocks  = r.lvl === 1 ? ['A'] : (r.lvl === 2 ? ['A','B'] : ['A','B','V']);
+  r.nalog   = r.lvl === 1 ? 'Рекомендуется' : 'Обязательна (п. 12.5)';
+  r.vyezd   = r.lvl === 1 ? 'Не требуется'
+            : r.lvl === 2 ? 'По решению комплаенс-менеджера'
+            : 'Обязателен для нового подрядчика, крупной подрядной сделки либо при сомнениях в ресурсах; для ранее проверенного — по решению КМ или техзаказчика. С фотофиксацией и актом осмотра';
+
+  /* --- квалификации из чек-листа и Приложения № 6 --- */
+  const abs = [], over = [], flag = [];
+  r.scope.forEach(n=>{
+    const c = S.cl[n];
+    if(!c || !c.q || c.q==='ok') return;
+    const item = CHECKLIST.find(x=>x.n===n);
+    const rec = {src:`Чек-лист, поз. ${n}`, t:item.t, why:c.note||''};
+    if(c.q==='abs') abs.push(rec); else if(c.q==='over') over.push(rec); else flag.push(rec);
+  });
+  CRIT.forEach(c=>{
+    const q = S.crit[c.n];
+    if(!q || q==='no') return;
+    const rec = {src:`Приложение № 6, п. ${c.n}`, t:c.t, why:(S.crit[c.n+'_why']||'')};
+    if(q==='abs') abs.push(rec); else if(q==='over') over.push(rec); else flag.push(rec);
+  });
+  (S.flags||[]).forEach(n=>{
+    const f = FLAGS.find(x=>x.n===n);
+    if(f) flag.push({src:`Приложение № 6, красный флаг ${n}`, t:f.t, why:''});
+  });
+  r.abs = abs; r.over = over; r.flag = flag;
+
+  /* --- профильные мнения (п. 6.4) --- */
+  const need = [];
+  if(r.lvl===3) need.push({d:'Юридический департамент', why:'углублённый уровень риска'});
+  else if(abs.length||over.length) need.push({d:'Юридический департамент', why:'выявлен стоп-фактор'});
+  const finFlag = r.scope.some(n=>{ const c=S.cl[n]; const it=CHECKLIST.find(x=>x.n===n); return it && it.fin && c && c.q && c.q!=='ok'; });
+  if(r.lvl===3) need.push({d:'Финансовый департамент', why:'углублённый уровень риска'});
+  else if(S.intragroup || S.excl==='intragroup') need.push({d:'Финансовый департамент', why:'внутригрупповая сделка'});
+  else if(finFlag) need.push({d:'Финансовый департамент', why:'красные флаги налогового или финансового характера'});
+  if(r.lvl===3 && (sj.sk || sj.teh)) need.push({d:'Технический заказчик', why:'подряд, проектирование или поставка оборудования при углублённом уровне'});
+  r.need = need;
+
+  /* --- меры митигации --- */
+  const groups = new Set();
+  (S.flags||[]).forEach(n=>{ const f=FLAGS.find(x=>x.n===n); if(f) groups.add(f.m); });
+  if(S.affil || S.crit[13] && S.crit[13]!=='no') groups.add('AFF');
+  if(S.foreign) groups.add('FOR');
+  if(r.lvl>=2) groups.add('TAX');
+  if(S.age==='<1' || S.noexp) groups.add('NEW');
+  r.mit = [...groups].map(g=>({g, t:MIT[g]}));
+
+  r.done = r.scope.filter(n=>S.cl[n] && S.cl[n].q).length;
+
+  /* --- вывод (п. 7.9) --- */
+  if(r.skip){
+    r.verdict = 'skip';
+    r.verdictText = 'Комплаенс-проверка не требуется';
+  } else if(abs.length){
+    r.verdict = 'neg';
+    r.verdictText = 'Отрицательное. Абсолютный стоп-фактор';
+    r.verdictWhy = 'Заключение договора не допускается до устранения обстоятельства либо прекращения установленного законом запрета. Управленческим решением по п. 8.3 абсолютный стоп-фактор не преодолевается.';
+  } else if(over.length){
+    r.verdict = 'neg';
+    r.verdictText = 'Отрицательное либо с условиями. Преодолимый стоп-фактор';
+    r.verdictWhy = 'Передача договора на согласование допускается после устранения фактора либо по письменному мотивированному решению уполномоченного лица (п. 8.3).';
+    r.needP83 = true;
+    r.needPartner = r.lvl===3 || over.length>=2;
+  } else if(r.done < r.scope.length){
+    r.verdict = 'draft';
+    r.verdictText = 'Проверка не завершена';
+    r.verdictWhy = `Заполнено ${r.done} позиций чек-листа из ${r.scope.length}. Непроведение проверки в срок не означает положительного Заключения и не позволяет запускать договор на согласование (п. 8.6).`;
+  } else if(flag.length || r.mit.length){
+    r.verdict = 'cond';
+    r.verdictText = 'С условиями (митигация)';
+    r.verdictWhy = 'Контрагент допускается к заключению договора при включении в него условий, указанных в Заключении.';
+  } else {
+    r.verdict = 'ok';
+    r.verdictText = 'Без замечаний';
+    r.verdictWhy = 'Контрагент допускается к заключению договора на стандартных условиях.';
+  }
+
+  /* --- обоснования (Приложение № 5: оценочные понятия не применяются автоматически) --- */
+  r.missing = [];
+  r.scope.forEach(n=>{
+    const c = S.cl[n];
+    if(c && c.q && c.q!=='ok' && !(c.note||'').trim()) r.missing.push(`поз. ${n} чек-листа`);
+  });
+  CRIT.forEach(c=>{ const q=S.crit[c.n]; if(q && q!=='no' && !((S.crit[c.n+'_why']||'').trim())) r.missing.push(`Прил. № 6, п. ${c.n}`); });
+
+  r.validUntil = S.date ? addMonths(S.date, r.valid) : '';
+  return r;
+}
+
+/* ====================== рендер: шаги ====================== */
+const STEPS = ['Сделка','Чек-лист','Стоп-факторы','Митигация','Заключение'];
+function renderSteps(){
+  const r = calc();
+  document.getElementById('steps').innerHTML = STEPS.map((t,i)=>{
+    const n=i+1;
+    let done=false;
+    if(n===1) done = !!(S.cp && S.sum);
+    if(n===2) done = r.done === r.scope.length && r.scope.length>0;
+    if(n===3) done = step>3;
+    if(n===4) done = step>4;
+    return `<button class="step ${done?'done':''}" data-step="${n}" aria-current="${step===n}"><span class="num">${done?'✓':n}</span>${t}</button>`;
+  }).join('');
+}
+
+/* ====================== шаг 1 ====================== */
+function renderS1(){
+  const r = calc();
+  const o = r.org;
+  const sel = (v,cur)=> v==cur ? ' selected' : '';
+  const P46 = [
+    'Продление договора либо допсоглашение об увеличении цены более чем на 20 % или существенном изменении предмета',
+    'Истёк срок действия ранее выданного Заключения (п. 9.4)',
+    'Субподрядчик или соисполнитель контрагента, привлечение которого согласуется организацией Группы',
+    'Поступила информация о рисках контрагента (п. 10.3) — внеочередная проверка',
+    'Требование уполномоченного лица, управляющего партнёра либо мотивированное решение комплаенс-менеджера',
+  ];
+  const noOrgs = !ORGS.length;
+  document.getElementById('s1').innerHTML = `
+  ${noOrgs?`<div class="card" style="border-color:var(--warn)">
+    <div class="hd"><h2>Сначала внесите организации и пороги</h2><span class="ref">Приложение № 2, п. 4.2</span></div>
+    <p style="margin-top:0">Пороговые значения устанавливаются приказом руководителя каждой организации Группы, поэтому в коде приложения они не хранятся. Внесите их один раз — они останутся в этом браузере.</p>
+    <div class="btnrow" style="margin:0"><button class="btn primary" data-view="orgs">Перейти к порогам</button></div>
+  </div>`:''}
+  <div class="card">
+    <div class="hd"><h2>Сделка и контрагент</h2><span class="ref">разделы 4–5 Регламента</span></div>
+    <div class="grid2">
+      <label class="f">Организация Группы
+        <select data-f="org">${noOrgs?'<option value="0">— справочник пуст —</option>':ORGS.map(x=>`<option value="${x.id}"${sel(x.id,S.org)}>${esc(x.name)}</option>`).join('')}</select>
+      </label>
+      <label class="f">Инициатор (Ф.И.О., должность)
+        <input type="text" data-f="initiator" value="${esc(S.initiator)}" placeholder="Иванов И.И., начальник ОМТС">
+      </label>
+      <label class="f">Контрагент — наименование
+        <input type="text" data-f="cp" value="${esc(S.cp)}" placeholder="ООО «Ромашка»">
+      </label>
+      <label class="f">ИНН
+        <input type="text" data-f="inn" value="${esc(S.inn)}" placeholder="2540000000">
+      </label>
+      <label class="f">ОГРН
+        <input type="text" data-f="ogrn" value="${esc(S.ogrn)}">
+      </label>
+      <label class="f">Основание проверки
+        <select data-f="reason">
+          <option value="new"${sel('new',S.reason)}>Новый договор</option>
+          <option value="prolong"${sel('prolong',S.reason)}>Продление, допсоглашение</option>
+          <option value="extra"${sel('extra',S.reason)}>Внеочередная проверка</option>
+        </select>
+      </label>
+    </div>
+    <div class="sep"></div>
+    <div class="grid2">
+      <label class="f">Предмет договора
+        <select data-f="subj">${SUBJECTS.map(x=>`<option value="${x.v}"${sel(x.v,S.subj)}>${esc(x.t)}</option>`).join('')}</select>
+      </label>
+      <label class="f">Сумма договора с НДС, ₽ <span class="hint">п. 4.4: по совокупности взаимосвязанных сделок за квартал</span>
+        <input type="number" data-f="sum" value="${esc(S.sum)}" min="0" step="1000" placeholder="0">
+      </label>
+      <label class="f">Условия оплаты
+        <select data-f="pay">
+          <option value="fact"${sel('fact',S.pay)}>Оплата по факту, постоплата</option>
+          <option value="avans"${sel('avans',S.pay)}>Аванс со стороны организации Группы</option>
+          <option value="cp-prepay"${sel('cp-prepay',S.pay)}>Предоплата со стороны контрагента</option>
+        </select>
+      </label>
+      <label class="f">Размер аванса, %
+        <input type="number" data-f="avans" value="${esc(S.avans)}" min="0" max="100" ${S.pay!=='avans'?'disabled':''}>
+      </label>
+      <label class="f">Источник финансирования
+        <select data-f="fin">
+          <option value="own"${sel('own',S.fin)}>Собственные средства</option>
+          <option value="project"${sel('project',S.fin)}>Проектное финансирование, целевой банковский кредит</option>
+          <option value="dolevoe"${sel('dolevoe',S.fin)}>Средства участников долевого строительства (214-ФЗ)</option>
+        </select>
+      </label>
+      <label class="f">Срок деятельности контрагента
+        <select data-f="age">
+          <option value=">3"${sel('>3',S.age)}>Более 3 лет</option>
+          <option value="1-3"${sel('1-3',S.age)}>От 1 года до 3 лет</option>
+          <option value="&lt;1"${sel('<1',S.age)}>Менее 1 года</option>
+        </select>
+      </label>
+      <label class="f">История сотрудничества
+        <select data-f="hist">
+          <option value=">2"${sel('>2',S.hist)}>Более 2 лет без замечаний</option>
+          <option value="0.5-2"${sel('0.5-2',S.hist)}>От 6 месяцев до 2 лет</option>
+          <option value="new"${sel('new',S.hist)}>Новый контрагент либо есть замечания</option>
+        </select>
+      </label>
+      <label class="f">Дата проверки
+        <input type="date" data-f="date" value="${esc(S.date)}">
+      </label>
+    </div>
+    <div class="sep"></div>
+    <h3>Обстоятельства п. 5.3 — углублённый уровень независимо от суммы</h3>
+    <label class="chk"><input type="checkbox" data-b="noexp" ${S.noexp?'checked':''}> Нет подтверждённого опыта по предмету договора</label>
+    <label class="chk"><input type="checkbox" data-b="affil" ${S.affil?'checked':''}> Контрагент взаимозависим или аффилирован с организацией Группы, её участниками или руководителями</label>
+    <label class="chk"><input type="checkbox" data-b="foreign" ${S.foreign?'checked':''}> Иностранный элемент, трансграничные платежи</label>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Порог проверки и исключения</h2><span class="ref">пп. 4.5–4.7, Приложение № 2</span></div>
+    <table class="t"><tbody>
+      <tr><th style="width:46%">Порог проверки для ${esc(o.name)}</th><td><b>${money(o.porog)} ₽</b>${o.prikaz?` · приказ ${esc(o.prikaz)}`:' <span class="muted small">· реквизиты приказа не внесены</span>'}</td></tr>
+      <tr><th>Верхняя граница базового уровня</th><td>${money(o.base)} ₽</td></tr>
+      <tr><th>Верхняя граница стандартного уровня</th><td>${money(o.std)} ₽</td></tr>
+    </tbody></table>
+    <div class="sep"></div>
+    <h3>Проверка независимо от суммы (п. 4.6)</h3>
+    ${r.subj.sk?`<div class="hint" style="color:var(--warn)">Предмет договора относится к строительному блоку — проверка обязательна независимо от суммы, уровень не ниже стандартного.</div>`:''}
+    ${P46.map((t,i)=>`<label class="chk"><input type="checkbox" data-p46="${esc(t)}" ${(S.p46||[]).includes(t)?'checked':''}> ${esc(t)}</label>`).join('')}
+    <div class="sep"></div>
+    <h3>Исключения — проверка не проводится (п. 4.7)</h3>
+    <label class="f" style="max-width:520px">
+      <select data-f="excl">
+        <option value="">Исключение не применяется</option>
+        <option value="gov"${sel('gov',S.excl)}>Органы власти, местного самоуправления, государственные и муниципальные учреждения и предприятия</option>
+        <option value="mono"${sel('mono',S.excl)}>Ресурсоснабжающие организации, естественные монополии, операторы связи, кредитные организации (по перечню КМ)</option>
+        <option value="intragroup"${sel('intragroup',S.excl)}>Организация Группы — внутригрупповая сделка</option>
+      </select>
+    </label>
+    <div class="hint">Отнесение к исключению фиксируется инициатором в листе согласования со ссылкой на подпункт п. 4.7 и приказ об установлении порогов (п. 4.8).</div>
+    ${r.condSkip?`<div class="verdict v-cond" style="margin-top:12px">${esc(r.condSkip)}</div>`:''}
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Расчёт уровня риска</h2><span class="ref">Приложение № 1, пп. 5.2–5.3</span></div>
+    <div class="scroll"><table class="t">
+      <thead><tr><th>Критерий</th><th>Значение</th><th style="width:130px">Уровень</th></tr></thead>
+      <tbody>${r.parts.map(p=>`<tr><td>${esc(p.k)}</td><td class="muted">${esc(p.note)}</td><td><span class="badge ${LVL_CLASS[p.v]}">${LVL_NAME[p.v]}</span></td></tr>`).join('')}</tbody>
+    </table></div>
+    ${r.forced.length?`<div class="hint" style="margin-top:8px">${r.forced.map(esc).join('<br>')}</div>`:''}
+    ${r.p53.length?`<div class="verdict v-neg" style="margin-top:12px"><b>Углублённый уровень независимо от суммы (п. 5.3)</b><ul class="tight" style="margin:0">${r.p53.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`:''}
+    <div class="sep"></div>
+    <div class="grid2">
+      <label class="f">Мотивированное повышение уровня комплаенс-менеджером <span class="hint">Понижение ниже расчётного не допускается (п. 5.4)</span>
+        <select data-f="lvlManual">
+          <option value="0"${sel(0,S.lvlManual)}>Не повышать — ${LVL_NAME[r.lvlAuto]}</option>
+          ${r.lvlAuto<2?`<option value="2"${sel(2,S.lvlManual)}>Повысить до стандартного</option>`:''}
+          ${r.lvlAuto<3?`<option value="3"${sel(3,S.lvlManual)}>Повысить до углублённого</option>`:''}
+        </select>
+      </label>
+      <label class="f">Обоснование повышения
+        <input type="text" data-f="lvlWhy" value="${esc(S.lvlWhy)}" ${Number(S.lvlManual)?'':'disabled'}>
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Что запросить у контрагента</h2><span class="ref">Приложения № 3 и № 4, пп. 7.4–7.6</span></div>
+    <p class="small muted" style="margin-top:0">Минимизация (п. 7.4): всё, что есть в ЕГРЮЛ, «Прозрачном бизнесе», ГИР БО, реестрах СРО и лицензий, картотеках судебных дел и исполнительных производств, комплаенс-менеджер получает сам. Истребование таких документов у контрагента не допускается.</p>
+    <p><b>Анкета:</b> ${esc(r.anketa)}</p>
+    ${r.blocks.map(b=>`
+      <h3>Блок ${b==='A'?'А':b==='B'?'Б':'В'}</h3>
+      <ul class="tight">${DOCS[b].map(d=>`<li>${esc(d)}</li>`).join('')}</ul>`).join('')}
+    <div class="btnrow">
+      <button class="btn" data-act="copy-request">Скопировать запрос контрагенту</button>
+    </div>
+  </div>
+
+  <div class="btnrow"><button class="btn primary" data-go="2">Перейти к чек-листу →</button></div>`;
+}
+
+/* ====================== шаг 2 ====================== */
+function renderS2(){
+  const r = calc();
+  const items = r.scope.map(n=>{
+    const it = CHECKLIST.find(x=>x.n===n);
+    const c = S.cl[n] || {};
+    const q = c.q || '';
+    const cls = q==='abs'?'f-abs':q==='over'?'f-over':q==='flag'?'f-flag':'';
+    const src = it.u
+      ? `<a href="${it.u}" target="_blank" rel="noopener noreferrer">${esc(it.s)} ↗</a>`
+      : esc(it.s);
+    const needNote = q && q!=='ok' && !(c.note||'').trim();
+    return `<div class="ci ${cls}">
+      <div class="ci-hd"><span class="n">${n}</span><span class="what">${esc(it.t)}</span></div>
+      <div class="src">${src}${S.inn?` · <button class="btn ghost" style="padding:1px 7px;font-size:11.5px" data-copyinn="1">копировать ИНН</button>`:''}</div>
+      <div class="ctl">
+        <span class="seg">
+          <label><input type="radio" name="cl${n}" data-cl="${n}" value="ok" ${q==='ok'?'checked':''}><span>соответствует</span></label>
+          <label class="w"><input type="radio" name="cl${n}" data-cl="${n}" value="flag" ${q==='flag'?'checked':''}><span>красный флаг</span></label>
+          <label class="c"><input type="radio" name="cl${n}" data-cl="${n}" value="over" ${q==='over'?'checked':''}><span>преодолимый стоп-фактор</span></label>
+          <label class="c"><input type="radio" name="cl${n}" data-cl="${n}" value="abs" ${q==='abs'?'checked':''}><span>абсолютный стоп-фактор</span></label>
+        </span>
+      </div>
+      <textarea data-note="${n}" placeholder="Фактические показатели, дата и источник выгрузки, мотивированный вывод">${esc(c.note||'')}</textarea>
+      ${needNote?`<div class="need">Приложение № 5: оценочные понятия автоматически не применяются — укажите фактические показатели и обоснование.</div>`:''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('s2').innerHTML = `
+  <div class="card">
+    <div class="hd"><h2>Чек-лист комплаенс-проверки</h2><span class="ref">Приложение № 5 · уровень ${LVL_NAME[r.lvl].toLowerCase()} · позиции ${r.scope.length} из 28</span></div>
+    <p class="small muted" style="margin-top:0">Все сведения из открытых источников фиксируются выгрузкой в PDF или снимком экрана с указанием источника, даты и времени и приобщаются к комплаенс-досье. Ссылка на источник без сохранённой копии надлежащей фиксацией не признаётся (п. 7.3).</p>
+    <div class="btnrow" style="margin-top:6px">
+      <button class="btn" data-act="all-ok">Отметить все «соответствует»</button>
+      <button class="btn ghost" data-act="clear-cl">Сбросить</button>
+    </div>
+  </div>
+  <div class="card">${items}</div>
+  <div class="btnrow">
+    <button class="btn ghost" data-go="1">← Сделка</button>
+    <button class="btn primary" data-go="3">К стоп-факторам →</button>
+  </div>`;
+}
+
+/* ====================== шаг 3 ====================== */
+function renderS3(){
+  const r = calc();
+  const label = {flag:'красный флаг', over:'преодолимый стоп-фактор', abs:'абсолютный стоп-фактор'};
+  const crit = CRIT.map(c=>{
+    const cur = S.crit[c.n] || 'no';
+    const cls = cur==='abs'||cur==='over' ? 'f-over' : cur==='flag' ? 'f-flag' : '';
+    const opts = ['no'].concat(c.allow).map(v=>{
+      const cl = v==='flag'?'w':(v==='over'||v==='abs')?'c':'';
+      const txt = v==='no'?'не выявлено':label[v];
+      return `<label class="${cl}"><input type="radio" name="cr${c.n}" data-cr="${c.n}" value="${v}" ${cur===v?'checked':''}><span>${txt}</span></label>`;
+    }).join('');
+    const needNote = cur!=='no' && !((S.crit[c.n+'_why']||'').trim());
+    return `<div class="ci ${cls}">
+      <div class="ci-hd"><span class="n">${c.n}</span><span class="what">${esc(c.t)}</span></div>
+      <div class="src">${esc(c.q)}</div>
+      <div class="ctl"><span class="seg">${opts}</span></div>
+      ${cur!=='no'?`<textarea data-crwhy="${c.n}" placeholder="Конкретное основание, применимый запрет либо риск, мотивировка выбранной категории">${esc(S.crit[c.n+'_why']||'')}</textarea>`:''}
+      ${needNote?`<div class="need">Примечание к Приложению № 6: комплаенс-менеджер фиксирует конкретное основание и мотивирует выбранную категорию.</div>`:''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('s3').innerHTML = `
+  <div class="card">
+    <div class="hd"><h2>Критические факторы</h2><span class="ref">Приложение № 6, раздел 1</span></div>
+    <p class="small muted" style="margin-top:0">При отсутствии прямого правового запрета приоритет отдаётся квалификации как красного флага или преодолимого стоп-фактора с митигацией.</p>
+    ${crit}
+  </div>
+  <div class="card">
+    <div class="hd"><h2>Красные флаги</h2><span class="ref">Приложение № 6, раздел 2 · отмечено ${(S.flags||[]).length} из 15</span></div>
+    <p class="small muted" style="margin-top:0">Сами по себе сделку не блокируют, но требуют дополнительной проверки и мер митигации по п. 9.3. Два и более флага переводят проверку на углублённый уровень (п. 5.3).</p>
+    ${FLAGS.map(f=>`<label class="chk"><input type="checkbox" data-flag="${f.n}" ${(S.flags||[]).includes(f.n)?'checked':''}> <span><b class="pill">${f.n}</b> ${esc(f.t)}</span></label>`).join('')}
+  </div>
+  <div class="btnrow">
+    <button class="btn ghost" data-go="2">← Чек-лист</button>
+    <button class="btn primary" data-go="4">К митигации →</button>
+  </div>`;
+}
+
+/* ====================== шаг 4 ====================== */
+function renderS4(){
+  const r = calc();
+  document.getElementById('s4').innerHTML = `
+  <div class="card">
+    <div class="hd"><h2>Меры снижения риска</h2><span class="ref">п. 9.3</span></div>
+    ${r.mit.length ? `<div class="scroll"><table class="t">
+      <thead><tr><th style="width:34%">Выявленный риск</th><th>Мера снижения риска</th></tr></thead>
+      <tbody>${r.mit.map(m=>`<tr><td>${esc({NEW:'Срок деятельности менее 12 месяцев; отсутствие подтверждённого опыта',RES:'Недостаточность трудовых и производственных ресурсов',TAX:'Признаки налоговых рисков',SUD:'Судебные споры и исполнительные производства на существенную сумму',AFF:'Признаки аффилированности с организацией Группы или её работниками',FOR:'Иностранный элемент, трансграничные платежи'}[m.g])}</td><td>${esc(m.t)}</td></tr>`).join('')}</tbody>
+    </table></div>` : `<p class="muted">Рисков, требующих митигации, не выявлено.</p>`}
+  </div>
+  <div class="card">
+    <div class="hd"><h2>Обязательные к включению в договор условия</h2><span class="ref">Приложение № 7, раздел 5</span></div>
+    ${TERMS.map((t,i)=>{
+      const forced = i===0 && r.lvl>=2;
+      return `<label class="chk"><input type="checkbox" data-term="${i}" ${(S.terms[i]||forced)?'checked':''} ${forced?'disabled':''}> <span>${esc(t)}${forced?' <span class="badge b-acc">обязательна, п. 12.5</span>':''}</span></label>
+      <input type="text" data-termv="${i}" value="${esc(S.terms[i+'_v']||'')}" placeholder="уточнение: процент, вид обеспечения, срок" style="margin:0 0 8px 26px;width:calc(100% - 26px);font-size:13px" ${(S.terms[i]||forced)?'':'disabled'}>`;
+    }).join('')}
+    <div class="hint">Юридический отдел при правовой экспертизе проверяет фактическое включение этих условий в текст договора и отражает результат в своей визе (п. 12.3).</div>
+  </div>
+  <div class="card">
+    <div class="hd"><h2>Профильные мнения</h2><span class="ref">пп. 6.4–6.5</span></div>
+    ${r.need.length ? `<ul class="tight">${r.need.map(n=>`<li><b>${esc(n.d)}</b> — обязательно: ${esc(n.why)}. Срок: ${esc(r.opinion)}.</li>`).join('')}</ul>
+      <div class="hint">Непредставление мнения в срок само по себе не препятствует оформлению Заключения; комплаенс-менеджер делает об этом отметку. Исключение — случаи, когда без мнения невозможно установить наличие абсолютного стоп-фактора.</div>`
+    : `<p class="muted">Обязательное привлечение профильных подразделений не требуется. Комплаенс-менеджер вправе запросить мнение по своему решению.</p>`}
+  </div>
+  <div class="btnrow">
+    <button class="btn ghost" data-go="3">← Стоп-факторы</button>
+    <button class="btn primary" data-go="5">К Заключению →</button>
+  </div>`;
+}
+
+/* ====================== шаг 5 ====================== */
+function concText(){
+  const r = calc(), o = r.org;
+  const L = [];
+  const nl = ()=>L.push('');
+  L.push('ЗАКЛЮЧЕНИЕ КОМПЛАЕНС-МЕНЕДЖЕРА ПО РЕЗУЛЬТАТАМ ПРОВЕРКИ КОНТРАГЕНТА');
+  L.push('(Приложение № 7 к Регламенту о порядке проведения комплаенс-проверки контрагентов)');
+  nl();
+  L.push(`Номер и дата Заключения: ${S.num||'б/н'} от ${rus(S.date)}`);
+  L.push(`Организация Группы: ${o.name}, ИНН ${o.inn}`);
+  L.push(`Порог проверки и границы уровней: ${money(o.porog)} / ${money(o.base)} / ${money(o.std)} ₽${o.prikaz?` (приказ ${o.prikaz})`:''}`);
+  L.push(`Контрагент: ${S.cp||'—'}, ИНН ${S.inn||'—'}${S.ogrn?`, ОГРН ${S.ogrn}`:''}`);
+  L.push(`Предмет и сумма договора: ${r.subj.t}; ${money(r.sum)} ₽ с НДС`);
+  L.push(`Условия оплаты: ${S.pay==='fact'?'оплата по факту':S.pay==='cp-prepay'?'предоплата со стороны контрагента':`аванс ${r.avans} %`}; источник финансирования — ${ {own:'собственные средства',project:'проектное финансирование',dolevoe:'средства участников долевого строительства'}[S.fin] }`);
+  L.push(`Инициатор: ${S.initiator||'—'}`);
+  L.push(`Основание проверки: ${ {new:'новый договор',prolong:'продление, дополнительное соглашение',extra:'внеочередная проверка'}[S.reason] }`);
+  L.push(`Присвоенный уровень риска: ${LVL_NAME[r.lvl].toLowerCase()}${r.raised?` (повышен комплаенс-менеджером: ${S.lvlWhy||'обоснование не указано'})`:''}`);
+  if(r.p53.length) L.push(`Основания углублённого уровня (п. 5.3): ${r.p53.join('; ')}`);
+  nl();
+  L.push('1. РЕЗУЛЬТАТЫ ПРОВЕРКИ (позиции чек-листа Приложения № 5)');
+  L.push(`Проверенные позиции: ${r.scope.join(', ')}.`);
+  r.scope.forEach(n=>{
+    const c = S.cl[n]||{}; const it = CHECKLIST.find(x=>x.n===n);
+    const q = {ok:'соответствует',flag:'красный флаг',over:'преодолимый стоп-фактор',abs:'абсолютный стоп-фактор'}[c.q] || 'не заполнено';
+    L.push(`  ${n}. ${it.t} — ${q}.${(c.note||'').trim()?` ${c.note.trim()}`:''}`);
+  });
+  nl();
+  L.push('2. ПРОФИЛЬНЫЕ МНЕНИЯ ПОДРАЗДЕЛЕНИЙ');
+  if(r.need.length) r.need.forEach(n=>L.push(`  ${n.d} — запрошено обязательно (${n.why}). Запрошено ____________, получено ____________. Существо позиции: ____________`));
+  else L.push('  Обязательное привлечение не требуется.');
+  nl();
+  L.push('3. СТОП-ФАКТОРЫ И КРАСНЫЕ ФЛАГИ');
+  if(!r.abs.length && !r.over.length && !r.flag.length) L.push('  Не выявлены.');
+  r.abs.forEach(x=>L.push(`  Абсолютный стоп-фактор — ${x.t} (${x.src}). ${x.why}`));
+  r.over.forEach(x=>L.push(`  Преодолимый стоп-фактор — ${x.t} (${x.src}). ${x.why}`));
+  r.flag.forEach(x=>L.push(`  Красный флаг — ${x.t} (${x.src}). ${x.why}`));
+  nl();
+  L.push('4. ВЫВОД');
+  L.push(`  ${r.verdictText}. ${r.verdictWhy||''}`);
+  nl();
+  L.push('5. ОБЯЗАТЕЛЬНЫЕ К ВКЛЮЧЕНИЮ В ДОГОВОР УСЛОВИЯ (МИТИГАЦИЯ)');
+  const chosen = TERMS.map((t,i)=>({t,i})).filter(({i})=> S.terms[i] || (i===0 && r.lvl>=2));
+  if(chosen.length) chosen.forEach(({t,i},k)=>L.push(`  ${k+1}. ${t}${(S.terms[i+'_v']||'').trim()?`: ${S.terms[i+'_v'].trim()}`:''}`));
+  else L.push('  Не требуются.');
+  if(r.mit.length){ nl(); L.push('  Рекомендуемые меры по п. 9.3:'); r.mit.forEach(m=>L.push(`  — ${m.t}`)); }
+  nl();
+  L.push(`6. СРОК ДЕЙСТВИЯ ЗАКЛЮЧЕНИЯ: до ${rus(r.validUntil)} (${r.valid} мес., п. 9.4)`);
+  nl();
+  L.push(`Комплаенс-менеджер: ${S.km||'____________________'}    Дата: ${rus(S.date)}    Подпись: ____________`);
+  if(r.needP83){
+    nl();
+    L.push('РЕШЕНИЕ УПОЛНОМОЧЕННОГО ЛИЦА (п. 8.3)');
+    L.push(S.decision || '____________________________________________________________________');
+    if(r.needPartner) L.push('Требуется дополнительное согласование управляющего партнёра Группы.');
+    L.push('Копия решения направляется управляющему партнёру Группы в течение 1 рабочего дня.');
+  }
+  if(r.abs.length){
+    nl();
+    L.push('Абсолютный стоп-фактор управленческим решением не преодолевается. Сделка возможна только после устранения обстоятельства либо подтверждения отсутствия установленного законом запрета.');
+  }
+  return L.join('\n');
+}
+
+function renderS5(){
+  const r = calc();
+  const vcls = {ok:'v-ok', cond:'v-cond', neg:'v-neg', skip:'v-off', draft:'v-off'}[r.verdict];
+  document.getElementById('s5').innerHTML = `
+  <div class="card noprint">
+    <div class="hd"><h2>Оформление Заключения</h2><span class="ref">Приложение № 7</span></div>
+    <div class="grid2">
+      <label class="f">Номер Заключения<input type="text" data-f="num" value="${esc(S.num)}" placeholder="КМ-2026/001"></label>
+      <label class="f">Комплаенс-менеджер (Ф.И.О.)<input type="text" data-f="km" value="${esc(S.km)}"></label>
+    </div>
+    ${r.needP83?`<label class="f" style="margin-top:12px">Решение уполномоченного лица (п. 8.3) — мотивировка, принятые меры митигации, лицо, принимающее риски
+      <textarea data-f="decision">${esc(S.decision)}</textarea></label>
+      ${r.needPartner?`<div class="hint" style="color:var(--crit)">Требуется дополнительное согласование управляющего партнёра Группы: ${r.lvl===3?'углублённый уровень риска':'два и более преодолимых стоп-фактора'}.</div>`:''}`:''}
+    ${r.missing.length?`<div class="verdict v-cond" style="margin-top:12px"><b>Не заполнено обоснование</b>${esc(r.missing.join(', '))}. Оценочные выводы без фактических показателей Приложением № 5 не допускаются.</div>`:''}
+    <div class="btnrow">
+      <button class="btn primary" data-act="save-reg">Внести в Реестр контрагентов</button>
+      <button class="btn" data-act="copy-concl">Копировать текст Заключения</button>
+      <button class="btn" data-act="doc-concl">Скачать .doc</button>
+      <button class="btn ghost" data-act="print">Печать</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="verdict ${vcls}"><b>${esc(r.verdictText)}</b>${esc(r.verdictWhy||r.skipWhy||'')}</div>
+    <div class="doc"><pre style="white-space:pre-wrap;font-family:var(--serif);font-size:13.5px;margin:0">${esc(concText())}</pre></div>
+  </div>
+  <div class="btnrow noprint"><button class="btn ghost" data-go="4">← Митигация</button></div>`;
+}
+
+/* ====================== боковая сводка ====================== */
+function renderSide(){
+  const r = calc();
+  const vcls = {ok:'v-ok', cond:'v-cond', neg:'v-neg', skip:'v-off', draft:'v-off'}[r.verdict];
+  document.getElementById('side').innerHTML = `
+  <div class="card" style="padding:14px 15px">
+    <div class="verdict ${vcls}"><b>${esc(r.verdictText)}</b>${esc(r.skip? r.skipWhy : (r.verdictWhy||''))}</div>
+    <div class="sum-line"><span>Уровень риска</span><span><span class="badge ${LVL_CLASS[r.lvl]}">${LVL_NAME[r.lvl]}</span></span></div>
+    <div class="sum-line"><span>Срок Стадии 0</span><span>до ${r.days} р.д.</span></div>
+    <div class="sum-line"><span>Позиции чек-листа</span><span>${r.done} / ${r.scope.length}</span></div>
+    <div class="sum-line"><span>Анкета</span><span>${esc(r.anketa)}</span></div>
+    <div class="sum-line"><span>Документы</span><span>Блок${r.blocks.length>1?'и':''} ${r.blocks.map(b=>b==='A'?'А':b==='B'?'Б':'В').join(', ')}</span></div>
+    <div class="sum-line"><span>Налоговая оговорка</span><span>${esc(r.nalog)}</span></div>
+    <div class="sum-line"><span>Выезд к контрагенту</span><span style="font-weight:500;font-size:12px">${esc(r.lvl===3?'Обязателен для нового подрядчика':r.vyezd)}</span></div>
+    <div class="sum-line"><span>Срок действия</span><span>${r.valid} мес. · до ${rus(r.validUntil)}</span></div>
+    <div class="sum-line"><span>Абс. / преод. / флаги</span><span>${r.abs.length} / ${r.over.length} / ${r.flag.length}</span></div>
+  </div>
+  <div class="card" style="padding:12px 14px">
+    <div class="btnrow" style="margin:0">
+      <button class="btn ghost" data-act="new">Новая проверка</button>
+      <button class="btn ghost" data-act="export-draft">Выгрузить JSON</button>
+    </div>
+  </div>`;
+}
+
+/* ====================== Реестр (Приложение № 8) ====================== */
+function renderRegistry(){
+  const rows = REG.map((x,i)=>{
+    const exp = x.validUntil && x.validUntil < today();
+    return `<tr class="${exp?'exp':''}">
+      <td>${i+1}</td><td>${esc(x.cp)}</td><td class="pill">${esc(x.inn)}</td><td>${esc(x.orgName)}</td>
+      <td>${esc(x.subject)}<br><span class="muted small">${money(x.sum)} ₽</span></td>
+      <td><span class="badge ${LVL_CLASS[x.lvl]}">${LVL_NAME[x.lvl]}</span></td>
+      <td>${esc(x.num||'б/н')}<br><span class="muted small">${rus(x.date)}</span></td>
+      <td>${esc(x.verdict)}</td>
+      <td class="small">${esc(x.mitig||'—')}</td>
+      <td class="small">${esc(x.decision||'—')}</td>
+      <td>${rus(x.validUntil)}${exp?'<br><span class="badge b-deep">истёк</span>':''}</td>
+      <td>${x.monitor?rus(x.monitor):'—'}<br><button class="btn ghost small" style="padding:2px 7px;font-size:11px" data-mon="${i}">отметить</button></td>
+      <td><button class="btn ghost" style="padding:2px 7px;font-size:11px" data-open="${i}">открыть</button>
+          <button class="btn ghost danger" style="padding:2px 7px;font-size:11px" data-del="${i}">×</button></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('v-registry').innerHTML = `
+  <div class="card" style="margin-top:18px">
+    <div class="hd"><h2>Реестр комплаенс-проверок контрагентов</h2><span class="ref">Приложение № 8 · записей: ${REG.length}</span></div>
+    <p class="small muted" style="margin-top:0">Реестр единый для всех организаций Группы, актуализируется в течение 1 рабочего дня с даты оформления Заключения либо проведения мониторинга. Мониторинг контрагентов углублённого уровня — не реже одного раза в квартал (п. 10.1).</p>
+    <div class="scroll"><table class="t">
+      <thead><tr><th>№</th><th>Контрагент</th><th>ИНН</th><th>Организация Группы</th><th>Предмет и сумма</th><th>Уровень</th><th>Заключение</th><th>Вывод</th><th>Митигация</th><th>Решение по п. 8.3</th><th>Действует до</th><th>Мониторинг</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="13" class="muted">Записей нет.</td></tr>'}</tbody>
+    </table></div>
+    <div class="btnrow">
+      <button class="btn" data-act="csv">Скачать CSV</button>
+      <button class="btn" data-act="copy-csv">Копировать CSV</button>
+      <button class="btn ghost" data-act="export-reg">Выгрузить JSON</button>
+      <button class="btn ghost" data-act="import-reg">Загрузить JSON</button>
+    </div>
+    <div class="hint">Данные хранятся в этом браузере (localStorage). Для единого по Группе реестра выгружайте JSON или CSV в общее хранилище.</div>
+  </div>`;
+}
+
+/* ====================== Пороги (Приложение № 2) ====================== */
+function renderOrgs(){
+  const rows = ORGS.map((o,i)=>`<tr>
+        <td>${i+1}</td>
+        <td><input type="text" data-org="${o.id}" data-k="name" value="${esc(o.name)}" placeholder="ООО «…»" style="min-width:190px"></td>
+        <td><input type="text" data-org="${o.id}" data-k="inn" value="${esc(o.inn)}" placeholder="ИНН" style="width:110px"></td>
+        <td><input type="text" data-org="${o.id}" data-k="role" value="${esc(o.role)}" placeholder="роль в Группе" style="min-width:150px"></td>
+        <td><input type="number" data-org="${o.id}" data-k="porog" value="${o.porog}" style="width:110px">${o.porog>300000?'<div class="need">свыше 300 000 ₽ — нужно письменное согласование управляющего партнёра</div>':''}</td>
+        <td><input type="number" data-org="${o.id}" data-k="base" value="${o.base}" style="width:120px"></td>
+        <td><input type="number" data-org="${o.id}" data-k="std" value="${o.std}" style="width:130px">${o.std<o.base?'<div class="need">граница стандартного уровня ниже базовой</div>':''}</td>
+        <td><input type="text" data-org="${o.id}" data-k="prikaz" value="${esc(o.prikaz)}" placeholder="№ и дата" style="width:140px"></td>
+        <td><button class="btn ghost danger" style="padding:2px 8px;font-size:12px" data-orgdel="${o.id}">×</button></td>
+      </tr>`).join('');
+
+  document.getElementById('v-orgs').innerHTML = `
+  <div class="card" style="margin-top:18px">
+    <div class="hd"><h2>Пороговые значения по организациям Группы</h2><span class="ref">Приложение № 2, пп. 4.1–4.3</span></div>
+    <p class="small muted" style="margin-top:0">Значения устанавливаются приказом руководителя каждой организации (п. 4.2), копия приказа направляется комплаенс-менеджеру в течение 3 рабочих дней. Порог проверки не может превышать 300 000 ₽ без письменного согласования управляющего партнёра. Пересмотр — не реже одного раза в год.</p>
+    <p class="small muted">Справочник хранится в этом браузере и никуда не отправляется. Чтобы перенести его на другой компьютер, выгрузите JSON и загрузите его там.</p>
+    ${ORGS.length?`<div class="scroll"><table class="t">
+      <thead><tr><th>№</th><th>Организация</th><th>ИНН</th><th>Роль в Группе</th><th>Порог, ₽</th><th>Базовый до, ₽</th><th>Стандартный до, ₽</th><th>Приказ</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`:`<p class="muted">Справочник пуст. Добавьте организацию или загрузите ранее выгруженный JSON.</p>`}
+    <div class="btnrow">
+      <button class="btn primary" data-act="org-add">Добавить организацию</button>
+      <button class="btn" data-act="org-import">Загрузить JSON</button>
+      <button class="btn ghost" data-act="org-export">Выгрузить JSON</button>
+    </div>
+  </div>`;
+}
+
+/* ====================== Справка ====================== */
+function renderHelp(){
+  document.getElementById('v-help').innerHTML = `
+  <div class="card" style="margin-top:18px">
+    <div class="hd"><h2>Как это устроено</h2></div>
+    <p>Приложение ведёт Стадию 0 договорной работы по Регламенту о порядке проведения комплаенс-проверки контрагентов ГК «С.АН ГРУПП»: считает уровень риска, показывает нужный объём чек-листа, квалифицирует стоп-факторы, подбирает меры митигации и собирает Заключение по форме Приложения № 7.</p>
+    <h3>Что считается автоматически</h3>
+    <ul class="tight">
+      <li>Нужна ли проверка вообще — порог организации (Приложение № 2), случаи п. 4.6 и исключения п. 4.7.</li>
+      <li>Уровень риска — по пяти критериям Приложения № 1, берётся наибольший (п. 5.2), затем применяются основания п. 5.3.</li>
+      <li>Объём чек-листа: базовый — позиции 1–7 и 19–21, стандартный — 1–14 и 19–24, углублённый — все 28.</li>
+      <li>Сроки Стадии 0 (1 / 2 / 5 рабочих дней), срок действия Заключения (12 / 12 / 6 месяцев), форма анкеты и блоки истребуемых документов.</li>
+      <li>Обязательность привлечения профильных подразделений (п. 6.4) и налоговой оговорки (п. 12.5).</li>
+      <li>Вывод по п. 7.9 и необходимость решения по п. 8.3, включая согласование управляющего партнёра.</li>
+    </ul>
+    <h3>Чего приложение не делает</h3>
+    <ul class="tight">
+      <li>Не ходит в ЕГРЮЛ, «Прозрачный бизнес», ГИР БО и картотеки само — даёт ссылки на источники, а результат вносит комплаенс-менеджер. Выгрузки и снимки экрана приобщаются к досье отдельно (п. 7.3).</li>
+      <li>Не заменяет мотивировку. Там, где Регламент требует фактических показателей и обоснования, поле обязательно к заполнению.</li>
+      <li>Не хранит данные на сервере: справочник порогов, реестр и черновик лежат в localStorage этого браузера и никуда не отправляются. Для единого по Группе реестра выгружайте JSON или CSV.</li>
+      <li>Не содержит пороговых значений: они устанавливаются приказами руководителей организаций и вносятся на вкладке «Пороги».</li>
+    </ul>
+    <h3>Понижение уровня</h3>
+    <p>Комплаенс-менеджер вправе мотивированно повысить уровень проверки по любой сделке. Понижение ниже уровня, определяемого Приложениями № 1 и № 2, не допускается (п. 5.4) — в приложении такой возможности нет.</p>
+  </div>`;
+}
+
+/* ====================== перерисовка ====================== */
+function render(){
+  ['check','registry','orgs','help'].forEach(v=>{
+    document.getElementById('v-'+v).classList.toggle('hidden', v!==view);
+  });
+  document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected', t.dataset.view===view));
+  if(view==='check'){
+    renderSteps();
+    [1,2,3,4,5].forEach(n=>document.getElementById('s'+n).classList.toggle('hidden', n!==step));
+    if(step===1) renderS1();
+    if(step===2) renderS2();
+    if(step===3) renderS3();
+    if(step===4) renderS4();
+    if(step===5) renderS5();
+    renderSide();
+  }
+  if(view==='registry') renderRegistry();
+  if(view==='orgs') renderOrgs();
+  if(view==='help') renderHelp();
+  save(LS.draft, S);
+}
+
+/* ====================== события ====================== */
+document.addEventListener('input', e=>{
+  const t = e.target;
+  if(t.dataset.f !== undefined){
+    const k = t.dataset.f;
+    S[k] = (t.type==='checkbox') ? t.checked : t.value;
+    if(k==='pay' && t.value!=='avans') S.avans = '';
+    if(k==='lvlManual') S.lvlManual = Number(t.value)||0;
+    if(['org','subj','pay','fin','age','hist','excl','lvlManual','reason'].includes(k)) render();
+    else { renderSide(); renderSteps(); save(LS.draft,S); }
+    return;
+  }
+  if(t.dataset.note !== undefined){
+    const n = t.dataset.note;
+    S.cl[n] = Object.assign({}, S.cl[n], {note:t.value});
+    save(LS.draft,S); renderSide(); return;
+  }
+  if(t.dataset.crwhy !== undefined){ S.crit[t.dataset.crwhy+'_why'] = t.value; save(LS.draft,S); return; }
+  if(t.dataset.termv !== undefined){ S.terms[t.dataset.termv+'_v'] = t.value; save(LS.draft,S); return; }
+  if(t.dataset.org !== undefined){
+    const o = ORGS.find(x=>x.id==t.dataset.org);
+    if(o){ const k=t.dataset.k; o[k] = ['name','inn','role','prikaz'].includes(k) ? t.value : (Number(t.value)||0); save(LS.orgs,ORGS); }
+    return;
+  }
+});
+
+document.addEventListener('change', e=>{
+  const t = e.target;
+  if(t.dataset.cl !== undefined){
+    S.cl[t.dataset.cl] = Object.assign({}, S.cl[t.dataset.cl], {q:t.value});
+    render(); return;
+  }
+  if(t.dataset.cr !== undefined){ S.crit[t.dataset.cr] = t.value; render(); return; }
+  if(t.dataset.flag !== undefined){
+    const n = Number(t.dataset.flag);
+    S.flags = S.flags || [];
+    if(t.checked){ if(!S.flags.includes(n)) S.flags.push(n); }
+    else S.flags = S.flags.filter(x=>x!==n);
+    render(); return;
+  }
+  if(t.dataset.b !== undefined){ S[t.dataset.b] = t.checked; render(); return; }
+  if(t.dataset.p46 !== undefined){
+    const v = t.dataset.p46; S.p46 = S.p46 || [];
+    if(t.checked){ if(!S.p46.includes(v)) S.p46.push(v); } else S.p46 = S.p46.filter(x=>x!==v);
+    render(); return;
+  }
+  if(t.dataset.term !== undefined){ S.terms[t.dataset.term] = t.checked; render(); return; }
+});
+
+document.addEventListener('click', e=>{
+  const t = e.target.closest('[data-step],[data-go],[data-act],[data-view],[data-open],[data-del],[data-mon],[data-copyinn],[data-orgdel]');
+  if(!t) return;
+
+  if(t.dataset.view){ view = t.dataset.view; render(); return; }
+  if(t.dataset.step){ step = Number(t.dataset.step); render(); window.scrollTo({top:0,behavior:'smooth'}); return; }
+  if(t.dataset.go){ step = Number(t.dataset.go); render(); window.scrollTo({top:0,behavior:'smooth'}); return; }
+  if(t.dataset.copyinn){ copy(S.inn||''); return; }
+
+  if(t.dataset.open !== undefined){
+    const rec = REG[Number(t.dataset.open)];
+    if(rec && rec.snapshot){ S = JSON.parse(JSON.stringify(rec.snapshot)); view='check'; step=1; render(); toast('Проверка загружена'); }
+    return;
+  }
+  if(t.dataset.del !== undefined){
+    REG.splice(Number(t.dataset.del),1); save(LS.reg,REG); render(); return;
+  }
+  if(t.dataset.orgdel !== undefined){
+    ORGS = ORGS.filter(o=>o.id != t.dataset.orgdel);
+    if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
+    save(LS.orgs,ORGS); render(); return;
+  }
+  if(t.dataset.mon !== undefined){
+    REG[Number(t.dataset.mon)].monitor = today(); save(LS.reg,REG); render(); toast('Мониторинг отмечен'); return;
+  }
+
+  const a = t.dataset.act;
+  const r = calc();
+
+  if(a==='new'){ S = blank(); step=1; render(); toast('Новая проверка'); return; }
+  if(a==='all-ok'){ r.scope.forEach(n=>{ S.cl[n]=Object.assign({},S.cl[n],{q:'ok'}); }); render(); return; }
+  if(a==='clear-cl'){ S.cl = {}; render(); return; }
+  if(a==='print'){ window.print(); return; }
+  if(a==='copy-concl'){ copy(concText()); return; }
+  if(a==='doc-concl'){
+    const html = `<html><head><meta charset="utf-8"></head><body style="font-family:Times New Roman,serif;font-size:12pt"><pre style="white-space:pre-wrap;font-family:Times New Roman,serif">${esc(concText())}</pre></body></html>`;
+    download(`Заключение_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${S.date}.doc`, html, 'application/msword');
+    return;
+  }
+  if(a==='copy-request'){
+    const lines = [
+      `Запрос документов и сведений для комплаенс-проверки`,
+      `Контрагент: ${S.cp||'—'}${S.inn?`, ИНН ${S.inn}`:''}`,
+      `Предмет: ${r.subj.t}. Уровень проверки: ${LVL_NAME[r.lvl].toLowerCase()}.`,
+      ``,
+      `Анкета: ${r.anketa} (Приложение № 4 к Регламенту).`,
+      ``,
+      `Документы (Приложение № 3):`,
+    ];
+    r.blocks.forEach(b=>{
+      lines.push(`Блок ${b==='A'?'А':b==='B'?'Б':'В'}:`);
+      DOCS[b].forEach((d,i)=>lines.push(`  ${i+1}. ${d}`));
+    });
+    lines.push('');
+    lines.push('Документы, доступные в открытых источниках (ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, реестры СРО и лицензий, картотеки судебных дел и исполнительных производств), не запрашиваются: они получаются самостоятельно.');
+    lines.push('Срок давности документов — не более 3 месяцев на дату представления, если не указано иное.');
+    copy(lines.join('\n'));
+    return;
+  }
+  if(a==='save-reg'){
+    if(!S.cp){ toast('Не указан контрагент'); return; }
+    const rec = {
+      cp:S.cp, inn:S.inn, orgName:r.org.name, subject:r.subj.t, sum:r.sum,
+      lvl:r.lvl, num:S.num, date:S.date, verdict:r.verdictText,
+      mitig: TERMS.map((tt,i)=> (S.terms[i]||(i===0&&r.lvl>=2)) ? tt : null).filter(Boolean).join('; '),
+      decision: r.needP83 ? (S.decision||'требуется') : '',
+      validUntil: r.validUntil, monitor:'', snapshot: JSON.parse(JSON.stringify(S)),
+    };
+    const ix = REG.findIndex(x=>x.inn===rec.inn && x.num===rec.num && rec.num);
+    if(ix>=0) REG[ix] = rec; else REG.unshift(rec);
+    save(LS.reg,REG); toast('Внесено в Реестр контрагентов'); return;
+  }
+  if(a==='csv' || a==='copy-csv'){
+    const head = ['№','Контрагент','ИНН','Организация Группы','Предмет','Сумма','Уровень риска','№ Заключения','Дата','Вывод','Меры митигации','Решение по п. 8.3','Действует до','Дата мониторинга'];
+    const q = s => `"${String(s==null?'':s).replace(/"/g,'""')}"`;
+    const csv = [head.map(q).join(';')].concat(REG.map((x,i)=>[i+1,x.cp,x.inn,x.orgName,x.subject,x.sum,LVL_NAME[x.lvl],x.num,rus(x.date),x.verdict,x.mitig,x.decision,rus(x.validUntil),x.monitor?rus(x.monitor):''].map(q).join(';'))).join('\r\n');
+    if(a==='csv') download('Реестр-комплаенс-проверок.csv', csv, 'text/csv;charset=utf-8');
+    else copy(csv);
+    return;
+  }
+  if(a==='export-reg'){ copy(JSON.stringify(REG,null,2)); download('reestr-komplaens.json', JSON.stringify(REG,null,2), 'application/json'); return; }
+  if(a==='export-draft'){ copy(JSON.stringify(S,null,2)); download('proverka-'+(S.inn||'draft')+'.json', JSON.stringify(S,null,2), 'application/json'); return; }
+  if(a==='import-reg'){
+    const txt = prompt('Вставьте JSON реестра:');
+    if(!txt) return;
+    try{ const d = JSON.parse(txt); if(Array.isArray(d)){ REG = d; save(LS.reg,REG); render(); toast('Реестр загружен'); } else toast('Ожидался массив записей'); }
+    catch(err){ toast('Не удалось разобрать JSON'); }
+    return;
+  }
+  if(a==='org-add'){
+    const id = ORGS.reduce((m,o)=>Math.max(m,o.id),0) + 1;
+    ORGS.push({id, name:'', inn:'', role:'', porog:0, base:0, std:0, prikaz:''});
+    if(!ORGS.find(o=>o.id==S.org)) S.org = id;
+    save(LS.orgs,ORGS); render(); return;
+  }
+  if(a==='org-export'){
+    const j = JSON.stringify(ORGS,null,2);
+    copy(j); download('porogi-organizaciy.json', j, 'application/json'); return;
+  }
+  if(a==='org-import'){
+    const txt = prompt('Вставьте JSON справочника организаций:');
+    if(!txt) return;
+    try{
+      const d = JSON.parse(txt);
+      if(!Array.isArray(d)){ toast('Ожидался массив организаций'); return; }
+      ORGS = d.map((o,i)=>({
+        id: Number(o.id)||i+1, name:String(o.name||''), inn:String(o.inn||''), role:String(o.role||''),
+        porog:Number(o.porog)||0, base:Number(o.base)||0, std:Number(o.std)||0, prikaz:String(o.prikaz||''),
+      }));
+      if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
+      save(LS.orgs,ORGS); render(); toast(`Загружено организаций: ${ORGS.length}`);
+    }catch(err){ toast('Не удалось разобрать JSON'); }
+    return;
+  }
+});
+
+/* тема */
+document.getElementById('theme').addEventListener('click', ()=>{
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur==='dark' ? 'light' : cur==='light' ? '' : 'dark';
+  if(next) document.documentElement.setAttribute('data-theme', next);
+  else document.documentElement.removeAttribute('data-theme');
+  try{ localStorage.setItem(LS.theme, next); }catch(e){}
+});
+try{ const th = localStorage.getItem(LS.theme); if(th) document.documentElement.setAttribute('data-theme', th); }catch(e){}
+
+render();
+</script>
+</body>
+</html>
