@@ -270,7 +270,7 @@
    ====================================================================== */
 
 const LS = {orgs:'kpk.orgs.v1', reg:'kpk.registry.v1', draft:'kpk.draft.v1', theme:'kpk.theme',
-            excl:'kpk.excl.v1', role:'kpk.role', api:'kpk.api.checko'};
+            excl:'kpk.excl.v1', role:'kpk.role'};
 
 /* Приложение № 2 — пороговые значения. В коде не хранятся:
    вносятся на вкладке «Пороги» и остаются в браузере пользователя. */
@@ -472,11 +472,12 @@ const blank = () => ({
   req:{sel:{}, edit:{}, extra:[], due:'', to:'', sign:''},   /* запрос документов */
   auto:null,                                /* результат автопроверки: суды, ФССП, ЕФРСБ */
   fromInit:null,                            /* кем и когда заполнен шаг «Сделка» */
+  dogovor:'',                               /* номер и дата договора, если сделка начата с файла */
 });
 let ORGS = load(LS.orgs) || ORGS_DEFAULT.map(o=>({...o}));
 let EXCL = load(LS.excl) || [];            /* перечень контрагентов-исключений, ведёт КМ */
 let ROLE = (function(){ try{ return localStorage.getItem(LS.role)==='init' ? 'init' : 'km'; }catch(e){ return 'km'; } })();
-function hydrate(d){ const b = blank(); const x = Object.assign(b, d||{}); x.req = Object.assign(blank().req, (d&&d.req)||{}); x.contracts = Array.isArray(x.contracts)?x.contracts:[]; return x; }
+function hydrate(d){ const b = blank(); const x = Object.assign(b, d||{}); x.req = Object.assign(blank().req, (d&&d.req)||{}); x.contracts = Array.isArray(x.contracts)?x.contracts:[]; if(x.auto && x.auto.def) x.auto = null; return x; }
 let S = hydrate(load(LS.draft));
 if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
 let REG = load(LS.reg) || [];
@@ -643,7 +644,7 @@ function calc(){
   });
   (S.flags||[]).forEach(n=>{
     const f = FLAGS.find(x=>x.n===n);
-    if(f) flag.push({src:`Приложение № 6, красный флаг ${n}`, t:f.t, why:''});
+    if(f) flag.push({src:`Приложение № 6, красный флаг ${n}`, t:f.t, why:(S.flagWhy && S.flagWhy[n]) || ''});
   });
   r.abs = abs; r.over = over; r.flag = flag;
 
@@ -725,6 +726,284 @@ function renderSteps(){
     if(n===5) done = step>5;
     return `<button class="step ${done?'done':''}" data-step="${n}" aria-current="${step===n}"><span class="num">${done?'✓':n}</span>${t}</button>`;
   }).join('');
+}
+
+/* ====================== подсказки по данным автопроверки ======================
+   Приложение ничего не квалифицирует само: оно показывает факт, называет позицию Приложения № 6,
+   к которой этот факт относится, и даёт отметить её одним нажатием. Решение — за комплаенс-менеджером. */
+function autoHints(){
+  const a = S.auto && S.auto.inn === digits(S.inn) ? S.auto : null;
+  const r = calc(), out = [];
+  const flag = (n, why)=>{ if(!(S.flags||[]).includes(n)) out.push({kind:'flag', n, t:(FLAGS.find(f=>f.n===n)||{}).t, why}); };
+  const crit = (n, why)=>{ const cur = S.crit[n]; if(!cur || cur==='no') out.push({kind:'crit', n, t:(CRIT.find(c=>c.n===n)||{}).t, why}); };
+  if(S.age === '<1') flag(1, a && a.egrul ? `по ЕГРЮЛ зарегистрирован ${a.egrul.reg}` : 'срок деятельности менее года');
+  if(!a) return out;
+  const p = a.pb;
+  if(p){
+    if(p.staff !== null && p.staff <= 1) flag(2, `среднесписочная численность за ${p.staffYear} год — ${p.staff}`);
+    if(p.massAddr > 0) flag(4, `«Прозрачный бизнес» относит адрес к адресам массовой регистрации`);
+    if(p.capital > 0 && p.capital <= 10000 && r.sum > (r.org.base||0) && r.org.base) flag(6, `уставный капитал ${money(p.capital)} ₽ при сумме сделки ${money(r.sum)} ₽`);
+    const f = p.fin[0];
+    if(f && f.expense > f.revenue) flag(7, `за ${f.year} год расходы ${money(f.expense)} ₽ превышают доходы ${money(f.revenue)} ₽`);
+    if(p.invalid) crit(1, '«Прозрачный бизнес» показывает отметку о недостоверности сведений');
+    if(p.arrears > 0 || p.debtToBailiff) crit(11, p.debtToBailiff ? 'есть задолженность по налогам, направленная на взыскание приставу' : `сведения о недоимке: записей — ${p.arrears}`);
+    if(f && f.revenue > 0 && r.sum > f.revenue) crit(12, `сумма сделки ${money(r.sum)} ₽ больше выручки за ${f.year} год (${money(f.revenue)} ₽)`);
+    if(p.liquidated || (p.status && !/действующ/i.test(p.status))) crit(2, `статус в «Прозрачном бизнесе»: ${p.status || 'ликвидировано'}`);
+  }
+  if(a.bk && a.bk.n) crit(2, `в реестре должников ЕФРСБ: ${(a.bk.rows[0] && (a.bk.rows[0].procedure || a.bk.rows[0].status)) || 'есть запись'}`);
+  if(a.egrul && a.egrul.ended) crit(2, `по ЕГРЮЛ деятельность прекращена ${a.egrul.ended}`);
+  if((a.kad && a.kad.def.nYear > 0) || (a.enf && a.enf.open > 0))
+    flag(8, [a.kad && a.kad.def.nYear > 0 ? `за последние 12 месяцев дел, где контрагент ответчик, — ${a.kad.def.nYear}` : '', a.enf && a.enf.open > 0 ? `неоконченных исполнительных производств — ${a.enf.open} на ${money(a.enf.debt)} ₽` : ''].filter(Boolean).join('; '));
+  /* одна и та же позиция может набрать несколько оснований */
+  const merged = [];
+  out.forEach(h=>{ const m = merged.find(x=>x.kind===h.kind && x.n===h.n); if(m) m.why += '; ' + h.why; else merged.push(h); });
+  return merged;
+}
+function hintsCard(){
+  const hs = autoHints();
+  if(!hs.length) return '';
+  return `<div class="card" style="border-color:var(--warn)">
+    <div class="hd"><h2>Подсказки по данным автопроверки</h2><span class="ref">решение за вами</span></div>
+    <p class="small muted" style="margin-top:0">Приложение нашло факты, которые подходят под позиции Приложения № 6. Отметить или нет — решаете вы: основание подставится в обоснование, его можно поправить.</p>
+    ${hs.map(h=>`<div class="rq"><div class="body"><b>${h.kind==='flag'?'Красный флаг':'Критический фактор'} ${h.n}.</b> ${esc(h.t||'')}<div class="hint" style="color:var(--warn)">${esc(h.why)}</div></div>
+      <button class="btn" style="flex:0 0 auto" data-hint="${h.kind}:${h.n}">Отметить</button></div>`).join('')}
+  </div>`;
+}
+function takeHint(key){
+  const [kind, nStr] = key.split(':'), n = Number(nStr);
+  const h = autoHints().find(x=>x.kind===kind && x.n===n); if(!h) return;
+  if(kind === 'flag'){
+    S.flags = S.flags || []; if(!S.flags.includes(n)) S.flags.push(n);
+    S.flagWhy = S.flagWhy || {}; S.flagWhy[n] = `По данным автопроверки ${stamp(S.auto ? S.auto.at : new Date().toISOString())}: ${h.why}.`;
+  }
+  else {
+    const c = CRIT.find(x=>x.n===n);
+    S.crit[n] = c.def;
+    if(!(S.crit[n+'_why']||'').trim()) S.crit[n+'_why'] = `По данным автопроверки ${stamp(S.auto.at)}: ${h.why}.`;
+  }
+  render();
+}
+
+/* ====================== загрузка договора ======================
+   Файл разбирается в браузере и никуда не отправляется. Из текста достаются стороны, ИНН,
+   ОГРН, сумма, аванс и предмет; найденное подставляется в сделку, после чего — если стоит
+   расширение — запускается автопроверка. Разбор эвристический: результат показывается
+   человеку, и всё, что подставлено, остаётся редактируемым. */
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+let docInfo = null;      /* что нашли в последнем загруженном договоре; в черновик не пишется */
+let docBusy = false;
+
+async function unzipEntry(buf, name){
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let i = u8.length - 22;
+  while(i >= 0 && dv.getUint32(i, true) !== 0x06054b50) i--;
+  if(i < 0) throw new Error('файл повреждён или это не .docx');
+  const n = dv.getUint16(i+10, true); let p = dv.getUint32(i+16, true);
+  for(let k = 0; k < n && dv.getUint32(p, true) === 0x02014b50; k++){
+    const method = dv.getUint16(p+10, true), csize = dv.getUint32(p+20, true);
+    const nl = dv.getUint16(p+28, true), el = dv.getUint16(p+30, true), cl = dv.getUint16(p+32, true), lho = dv.getUint32(p+42, true);
+    if(new TextDecoder().decode(u8.subarray(p+46, p+46+nl)) === name){
+      const start = lho + 30 + dv.getUint16(lho+26, true) + dv.getUint16(lho+28, true);
+      const data = u8.subarray(start, start + csize);
+      if(method === 0) return data;
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    p += 46 + nl + el + cl;
+  }
+  throw new Error('в файле нет текста документа');
+}
+async function docxText(buf){
+  const xml = new TextDecoder().decode(await unzipEntry(buf, 'word/document.xml'));
+  return xml.replace(/<\/w:p>/g, '\n').replace(/<\/w:tc>/g, ' \t ').replace(/<w:(tab|br)\b[^>]*\/>/g, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+}
+function loadScript(src){
+  return new Promise((res, rej)=>{ const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = ()=>rej(new Error('не удалось загрузить модуль чтения PDF — проверьте интернет')); document.head.appendChild(s); });
+}
+async function pdfText(buf){
+  if(!window.pdfjsLib){ await loadScript(PDFJS + 'pdf.min.js'); window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; }
+  const pdf = await window.pdfjsLib.getDocument({data:buf}).promise;
+  const out = [];
+  for(let n = 1; n <= Math.min(pdf.numPages, 80); n++){
+    const tc = await (await pdf.getPage(n)).getTextContent();
+    let line = '', y = null;
+    tc.items.forEach(it=>{ const iy = it.transform ? Math.round(it.transform[5]) : y; if(y !== null && Math.abs(iy - y) > 3){ out.push(line); line = ''; } line += (line && !/\s$/.test(line) ? ' ' : '') + it.str; y = iy; });
+    out.push(line);
+  }
+  const text = out.join('\n');
+  if(text.replace(/\s/g,'').length < 200) throw new Error('в PDF нет текстового слоя — похоже, это скан. Загрузите договор в .docx или текстовый PDF');
+  return text;
+}
+
+const ORG_FORM = '(?:Общество\\s+с\\s+ограниченной\\s+ответственностью|Публичное\\s+акционерное\\s+общество|Непубличное\\s+акционерное\\s+общество|Закрытое\\s+акционерное\\s+общество|Открытое\\s+акционерное\\s+общество|Акционерное\\s+общество|ООО|ПАО|НАО|ЗАО|ОАО|АО)';
+function normName(t){ const m = String(t||'').match(/[«"“„]([^»"”“]+)[»"”]/); return (m ? m[1] : String(t||'')).toLowerCase().replace(/[^a-zа-яё0-9]+/g,''); }
+function shortForm(t){
+  return t.replace(/Общество\s+с\s+ограниченной\s+ответственностью/i,'ООО').replace(/Публичное\s+акционерное\s+общество/i,'ПАО')
+          .replace(/Непубличное\s+акционерное\s+общество/i,'НАО').replace(/Закрытое\s+акционерное\s+общество/i,'ЗАО')
+          .replace(/Открытое\s+акционерное\s+общество/i,'ОАО').replace(/Акционерное\s+общество/i,'АО')
+          .replace(/Индивидуальный\s+предприниматель/i,'ИП').replace(/\s+/g,' ').trim()
+          .replace(/^([^«"“„]*)[«"“„](.*)[»"”]$/, (m, form, inner)=>{
+            /* вложенное название: ОАО "АК "ТРАНСАЭРО" -> ОАО «АК «ТРАНСАЭРО»» */
+            const odd = (inner.match(/["“„”]/g)||[]).length % 2 === 1;
+            let open = true;
+            inner = inner.replace(/["“„”]/g, ()=>{ const q = open ? '«' : '»'; open = !open; return q; });
+            return form + '«' + inner + (odd ? '»' : '') + '»';
+          });
+}
+function parseMoney(t){ return Number(String(t).replace(/[\s ]/g,'').replace(',','.')) || 0; }
+
+function parseContract(raw){
+  const text = raw.replace(/ /g,' ').replace(/[ \t]+/g,' ');
+  const head = text.slice(0, 2500), low = text.toLowerCase();
+  const r = {parties:[], sum:0, avans:null, prepay100:false, subj:'', num:'', date:'', notes:[]};
+
+  /* стороны: наименования из преамбулы, ИНН и ОГРН — откуда найдутся */
+  const names = [];
+  /* кавычки бывают вложенными («АК «Трансаэро», "Компания "Ромашка"), поэтому название берётся
+     до закрывающей кавычки, после которой идёт запятая, скобка, «именуемое», «в лице» или реквизит */
+  const reOrg = new RegExp(ORG_FORM + '\\s*[«"“„][^\\n]{2,140}?[»"”](?=\\s*(?:[,(;]|именуем|в\\s+лице|ИНН|КПП|ОГРН|адрес|$|\\n))', 'gi');
+  const reIp = /Индивидуальный\s+предприниматель\s+[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+)?/g;
+  [reOrg, reIp].forEach(re=>{ let m; while((m = re.exec(text))) names.push({t:shortForm(m[0]), at:m.index}); });
+  names.sort((a,b)=>a.at-b.at);
+  const uniqNames = []; names.forEach(n=>{ if(!uniqNames.find(x=>normName(x.t)===normName(n.t))) uniqNames.push(n); });
+
+  const inns = []; { const re = /ИНН(?:\s*\/\s*КПП)?[\s:№]*?(\d{12}|\d{10})(?!\d)/gi; let m; while((m = re.exec(text))) if(!inns.find(x=>x.v===m[1])) inns.push({v:m[1], at:m.index}); }
+  const ogrns = []; { const re = /ОГРН(?:ИП)?[\s:№]*?(\d{15}|\d{13})(?!\d)/gi; let m; while((m = re.exec(text))) if(!ogrns.find(x=>x.v===m[1])) ogrns.push({v:m[1], at:m.index}); }
+  const nearest = (list, at)=> list.length ? list.reduce((a,b)=>Math.abs(b.at-at) < Math.abs(a.at-at) ? b : a) : null;
+
+  inns.forEach((inn, i)=>{
+    const og = nearest(ogrns, inn.at);
+    const okOgrn = og && Math.abs(og.at - inn.at) < 400 && (inn.v.length===12) === (og.v.length===15);
+    const mine = ORGS.find(o=>digits(o.inn) === inn.v);
+    r.parties.push({inn:inn.v, ogrn:okOgrn ? og.v : '', name:'', mine:mine||null, order:i});
+  });
+  /* названия сопоставляются с ИНН по порядку: сторона 1 и сторона 2 в преамбуле и в реквизитах идут одинаково */
+  const free = uniqNames.slice();
+  r.parties.forEach(p=>{ if(p.mine){ const k = free.findIndex(n=>normName(n.t)===normName(p.mine.name)); if(k>=0) free.splice(k,1); p.name = p.mine.name; } });
+  r.parties.filter(p=>!p.mine).forEach(p=>{
+    const k = free.findIndex(n=>!ORGS.find(o=>normName(o.name)===normName(n.t)));
+    if(k>=0){ p.name = free[k].t; free.splice(k,1); }
+  });
+  if(!r.parties.length) uniqNames.filter(n=>!ORGS.find(o=>normName(o.name)===normName(n.t))).slice(0,2).forEach(n=>r.parties.push({inn:'', ogrn:'', name:n.t, mine:null}));
+
+  /* номер и дата */
+  let m = head.match(/ДОГОВОР[^\n№]{0,80}№\s*([^\s,;]+)/i); if(m) r.num = m[1].replace(/[_]+/g,'').slice(0,40);
+  m = head.match(/[«"]?(\d{1,2})[»"]?\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})/i) || head.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if(m) r.date = m[0].replace(/[«»"]/g,'');
+
+  /* цена */
+  m = text.match(/(?:цена|стоимость|сумма)[^.;\n]{0,160}?(\d{1,3}(?:[ ]\d{3})+(?:[.,]\d{2})?|\d{4,}(?:[.,]\d{2})?)\s*(?:\(|руб|₽)/i);
+  if(m) r.sum = parseMoney(m[1]);
+  if(!r.sum){ let best = 0, mm; const re = /(\d{1,3}(?:[ ]\d{3})+(?:[.,]\d{2})?|\d{5,}(?:[.,]\d{2})?)\s*(?:\([^)]{0,200}\)\s*)?руб/gi; while((mm = re.exec(text))) best = Math.max(best, parseMoney(mm[1])); r.sum = best; if(best) r.notes.push('цена взята как наибольшая сумма в рублях — проверьте'); }
+
+  /* аванс */
+  m = text.match(/(?:аванс|предоплат|предварительн\S*\s+оплат)[^.;\n]{0,140}?(\d{1,3})\s*(?:\([^)]{0,60}\)\s*)?(?:%|процент)/i)
+   || text.match(/(\d{1,3})\s*(?:\([^)]{0,60}\)\s*)?(?:%|процент)\S*[^.;\n]{0,80}?(?:аванс|предоплат)/i);
+  if(m){ const v = Number(m[1]); if(v > 0 && v <= 100) r.avans = v; }
+
+  /* предмет */
+  const zone = (head + ' ' + (text.match(/предмет\s+договора[\s\S]{0,900}/i)||[''])[0]).toLowerCase();
+  const has = re => re.test(zone);
+  r.subj = has(/техническ\S+\s+заказчик/) ? 'tehzak'
+    : has(/проектн|изыскат|проектно-сметн/) ? 'proekt'
+    : has(/подряд|строительно-монтаж|\bсмр\b|выполнени\S+\s+работ/) ? 'podryad'
+    : has(/займ|заём|кредит|залог|поручительств|уступк/) ? 'zaim'
+    : has(/купли-продажи/) && has(/недвижим|земельн|помещени|здани/) ? 'nedvizh'
+    : has(/инвестиционн|совместн\S+\s+деятельност|простого\s+товариществ/) ? 'sovm'
+    : has(/аренд/) ? 'arenda'
+    : has(/поставк/) && has(/оборудовани/) ? 'oborud'
+    : has(/поставк|купли-продажи/) ? 'postavka-reg'
+    : has(/самозанят|налог\S*\s+на\s+профессиональный\s+доход/) ? 'samozan'
+    : has(/услуг|агентск|консультац/) ? 'uslugi' : '';
+  r.chars = text.length;
+  return r;
+}
+
+function applyParty(i){
+  if(!docInfo) return;
+  const p = docInfo.parties[i]; if(!p) return;
+  docInfo.picked = i;
+  if(p.inn) S.inn = p.inn;
+  if(p.ogrn) S.ogrn = p.ogrn; else S.ogrn = '';
+  if(p.name) S.cp = p.name;
+  S.auto = null; autoErr = '';
+  render();
+  if(extVersion() && [10,12].includes(digits(S.inn).length)) autoCheck();
+}
+
+async function loadContract(file){
+  docBusy = true; docInfo = null; render();
+  try{
+    const ext = (file.name.split('.').pop()||'').toLowerCase();
+    const buf = await file.arrayBuffer();
+    let text;
+    if(ext === 'docx') text = await docxText(buf);
+    else if(ext === 'pdf') text = await pdfText(buf);
+    else if(ext === 'txt') text = new TextDecoder().decode(buf);
+    else throw new Error(ext === 'doc' || ext === 'rtf' ? 'старый формат .' + ext + ' не читается — сохраните договор как .docx или PDF' : 'поддерживаются .docx, .pdf и .txt');
+    const r = parseContract(text);
+    docInfo = Object.assign(r, {file:file.name});
+    const mine = r.parties.find(p=>p.mine); if(mine) S.org = mine.mine.id;
+    if(r.subj) S.subj = r.subj;
+    if(r.sum) S.sum = String(r.sum);
+    if(r.avans){ S.pay = 'avans'; S.avans = String(r.avans); }
+    S.dogovor = [r.num && '№ ' + r.num, r.date && 'от ' + r.date].filter(Boolean).join(' ');
+    const others = r.parties.filter(p=>!p.mine);
+    docBusy = false;
+    if(others.length === 1) applyParty(r.parties.indexOf(others[0]));
+    else render();
+    toast('Договор прочитан');
+  }catch(e){
+    docBusy = false; docInfo = {error:String((e && e.message) || e), file:file.name, parties:[]}; render();
+  }
+}
+
+function docCard(){
+  const d = docInfo;
+  let body = '';
+  if(docBusy) body = `<p class="muted" style="margin:0">Читаю договор…</p>`;
+  else if(d && d.error) body = `<div class="verdict v-neg" style="margin:0 0 10px"><b>Договор не прочитан</b>${esc(d.error)}</div>`;
+  else if(d){
+    const others = d.parties.filter(p=>!p.mine), mine = d.parties.find(p=>p.mine);
+    const need = others.length !== 1;
+    const yes = (k,v)=>`<tr><th style="width:34%">${k}</th><td>${v}</td></tr>`;
+    body = `<div class="scroll"><table class="t"><tbody>
+      ${yes('Файл', esc(d.file) + (S.dogovor?` · договор ${esc(S.dogovor)}`:''))}
+      ${yes('Организация Группы', mine ? esc(mine.mine.name) + ` <span class="muted">· узнана по ИНН ${esc(mine.inn)}</span>` : '<span class="muted">не узнана — выберите в списке ниже</span>')}
+      ${yes('Контрагент', d.picked!==undefined && d.parties[d.picked] ? `<b>${esc(d.parties[d.picked].name||'наименование не найдено')}</b>, ИНН ${esc(d.parties[d.picked].inn||'—')}${d.parties[d.picked].ogrn?`, ОГРН ${esc(d.parties[d.picked].ogrn)}`:''}` : '<span class="muted">не выбран</span>')}
+      ${yes('Предмет', d.subj ? esc((SUBJECTS.find(x=>x.v===d.subj)||{}).t||'') : '<span class="muted">не определён — выберите вручную</span>')}
+      ${yes('Цена', d.sum ? money(d.sum) + ' ₽' : '<span class="muted">не найдена</span>')}
+      ${yes('Аванс', d.avans ? d.avans + ' %' : '<span class="muted">в тексте не найден — оставлена оплата по факту</span>')}
+    </tbody></table></div>
+    ${need && d.parties.length ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>Кто из сторон контрагент?</b>${others.length ? 'В договоре несколько сторон, которых нет в справочнике организаций Группы.' : 'Контрагент не определён.'}
+      <div class="btnrow" style="margin-top:8px">${d.parties.map((p,i)=>p.mine?'':`<button class="btn" data-docpick="${i}">${esc(p.name||'без наименования')}${p.inn?` · ИНН ${esc(p.inn)}`:''}</button>`).join('')}</div></div>` : ''}
+    ${!d.parties.length ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>Стороны не найдены</b>В тексте нет ни ИНН, ни наименований в привычном виде. Заполните контрагента вручную.</div>` : ''}
+    ${d.notes.length ? `<div class="hint">${d.notes.map(esc).join('; ')}.</div>` : ''}
+    <div class="hint">Разбор автоматический — сверьте значения с договором. Всё подставленное можно поправить в полях ниже.</div>`;
+  } else body = `<p class="small muted" style="margin:0 0 4px">Загрузите проект договора — приложение найдёт в нём стороны, ИНН, ОГРН, предмет, цену и аванс и заполнит сделку${extVersion()?', а затем само запустит автопроверку контрагента':''}. Файл читается в этом браузере и никуда не отправляется.</p>`;
+
+  const a = S.auto && S.auto.inn === digits(S.inn) ? S.auto : null;
+  const auto = !extVersion() ? '' : autoBusy
+    ? `<div class="verdict v-off" style="margin:10px 0 0"><b>Идёт автопроверка</b>ЕГРЮЛ, «Прозрачный бизнес», арбитражные дела и ЕФРСБ — 30–40 секунд. Можно продолжать заполнять сделку.</div>`
+    : a ? `<div class="verdict ${a.bk && a.bk.n ? 'v-neg' : 'v-ok'}" style="margin:10px 0 0"><b>Автопроверка выполнена ${esc(stamp(a.at))}</b>${[
+        a.egrul ? `ЕГРЮЛ: ${esc(a.egrul.name)}, зарегистрировано ${esc(a.egrul.reg)}${a.egrul.ended?`, деятельность прекращена ${esc(a.egrul.ended)}`:''}` : '',
+        a.pb ? `статус — ${esc((a.pb.status||'не указан').toLowerCase())}${a.pb.fin[0]?`, доходы за ${a.pb.fin[0].year} — ${money(a.pb.fin[0].revenue)} ₽`:''}` : '',
+        a.kad ? `арбитражные дела: ответчик — ${a.kad.def.n}, за 12 месяцев — ${a.kad.def.nYear}` : '',
+        a.bk ? (a.bk.n ? `в реестре банкротов — ${esc(a.bk.rows[0] ? a.bk.rows[0].procedure || a.bk.rows[0].status : 'есть запись')}` : 'в реестре банкротов не значится') : '',
+      ].filter(Boolean).join('; ')}.${autoErr?` Не всё прошло: ${esc(autoErr)}.`:''}</div>`
+    : autoErr ? `<div class="verdict v-neg" style="margin:10px 0 0"><b>Автопроверка не прошла</b>${esc(autoErr)}</div>` : '';
+
+  return `<div class="card" style="border-color:var(--accent)">
+    <div class="hd"><h2>Начать с договора</h2><span class="ref">.docx, .pdf, .txt</span></div>
+    ${body}
+    <div class="btnrow" style="margin-top:10px">
+      <button class="btn primary" data-act="doc-load">${d && !d.error ? 'Загрузить другой договор' : 'Загрузить договор'}</button>
+      ${extVersion() && !autoBusy && [10,12].includes(digits(S.inn).length) ? `<button class="btn" data-act="auto-run">${a?'Повторить автопроверку':'Запустить автопроверку'}</button>` : ''}
+    </div>
+    ${auto}
+  </div>`;
 }
 
 /* ====================== шаг 1 — заполняет инициатор ====================== */
@@ -878,6 +1157,7 @@ function renderS1(){
 
   document.getElementById('s1').innerHTML = `
   ${banner}
+  ${docCard()}
   ${noOrgs && ROLE==='km'?`<div class="card" style="border-color:var(--warn)">
     <div class="hd"><h2>Сначала внесите организации и пороги</h2><span class="ref">Приложение № 2, п. 4.2</span></div>
     <p style="margin-top:0">Пороговые значения устанавливаются приказом руководителя каждой организации Группы, поэтому в коде приложения они не хранятся. Внесите их один раз — они останутся в этом браузере.</p>
@@ -1108,142 +1388,197 @@ function renderReq(){
   document.querySelectorAll('#s2 .rq textarea').forEach(fit);
 }
 
-/* ====================== автопроверка: суды, приставы, банкротство ======================
-   Картотека арбитражных дел, банк данных ФССП и ЕФРСБ не отдают данные странице из браузера:
-   у них нет открытого API, а формы закрыты капчей. Поэтому сведения берутся через API Checko
-   (api.checko.ru) — он собирает те же три источника и разрешает запросы из браузера.
-   Ключ хранится только в localStorage комплаенс-менеджера. */
+/* ====================== автопроверка: суды, банкротство, приставы ======================
+   Картотека арбитражных дел, ЕФРСБ и ФССП не отвечают странице с чужого адреса, поэтому
+   запросы выполняет расширение для Chrome (папка extension/ в репозитории): оно открывает
+   сайт-источник в фоновой вкладке браузера комплаенс-менеджера и забирает ответ оттуда.
+   Сторонних сервисов и ключей нет. Капчу ФССП вводит человек. */
 const AUTO_MARK = 'Автопроверка';
-let autoBusy = false, autoErr = '';
-function apiKey(){ try{ return localStorage.getItem(LS.api)||''; }catch(e){ return ''; } }
-async function checko(method, params){
-  const u = new URL('https://api.checko.ru/v2/'+method);
-  u.searchParams.set('key', apiKey());
-  Object.keys(params).forEach(k=>u.searchParams.set(k, params[k]));
-  const res = await fetch(u, {referrerPolicy:'no-referrer'});
-  let j = null; try{ j = await res.json(); }catch(e){}
-  if(!j || !j.meta || j.meta.status!=='ok') throw new Error((j && j.meta && j.meta.message) || `сервис ответил кодом ${res.status}`);
-  return j;
+const EXT_ZIP = 'https://github.com/mazurovmikhail-ui/komplaens-kontragent/archive/refs/heads/main.zip';
+let autoBusy = false, autoErr = '', fsspWait = false, extSeq = 0;
+const extWait = {};
+function extVersion(){ return document.documentElement.getAttribute('data-kpk-ext') || ''; }
+function extTarget(){ return location.origin === 'null' ? '*' : location.origin; }
+function extCall(cmd, inn, timeout){
+  return new Promise((res, rej)=>{
+    const id = ++extSeq;
+    const t = setTimeout(()=>{ delete extWait[id]; rej(new Error('расширение не ответило — обновите страницу и повторите')); }, timeout);
+    extWait[id] = {res, rej, t};
+    window.postMessage({kpk:'req', id, cmd, inn}, extTarget());
+  });
 }
-function num(v){ return Number(v)||0; }
-function names(a){ return (Array.isArray(a)?a:[]).map(x=>x && x['Наим']).filter(Boolean).join(', '); }
-function safeUrl(u){ return /^https:\/\//.test(String(u||'')) ? u : ''; }
+window.addEventListener('message', e=>{
+  if(e.source !== window) return;
+  const m = e.data; if(!m || typeof m !== 'object') return;
+  if(m.kpk === 'ready'){ render(); return; }
+  if(m.kpk === 'res' && extWait[m.id]){
+    const w = extWait[m.id]; delete extWait[m.id]; clearTimeout(w.t);
+    if(m.ok) w.res(m.data); else w.rej(new Error(m.error || 'расширение вернуло ошибку'));
+    return;
+  }
+  if(m.kpk === 'fssp') takeFssp(m.data);
+});
 function stamp(iso){ const d=new Date(iso); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function safeUrl(u){ return /^https:\/\//.test(String(u||'')) ? u : ''; }
+function nodot(t){ return String(t||'').replace(/[.\s]+$/,''); }
+function str(v, max){ return String(v==null?'':v).slice(0, max||300); }
 
 async function autoCheck(){
   const inn = digits(S.inn);
   if(![10,12].includes(inn.length)){ toast('Укажите ИНН контрагента: 10 или 12 цифр'); return; }
-  if(!apiKey()){ toast('Сначала внесите ключ API на вкладке «Настройки»'); return; }
+  if(!extVersion()){ toast('Расширение не установлено — см. вкладку «Настройки»'); return; }
   autoBusy = true; autoErr = ''; render();
   try{
-    const q = {inn, sort:'-date'};
-    const def = await checko('legal-cases', Object.assign({role:'defendant'}, q));
-    const act = await checko('legal-cases', Object.assign({role:'defendant', active:'true', limit:'1'}, q));
-    const pl  = await checko('legal-cases', Object.assign({role:'plaintiff', limit:'1'}, q));
-    const enf = await checko('enforcements', q);
-    const bk  = await checko('bankruptcy-messages', q);
-    const who = def.company || def.entrepreneur || {};
-    const enfRows = (enf.data && enf.data['Записи']) || [];
-    S.auto = {
-      at:new Date().toISOString(), inn,
-      who:{name:who['НаимСокр']||who['НаимПолн']||who['ФИО']||'', ogrn:who['ОГРН']||who['ОГРНИП']||'', status:who['Статус']||'', reg:who['ДатаРег']||''},
-      def:{n:num(def.data['ЗапВсего']), sum:num(def.data['ОбщСуммИск']),
-           rows:((def.data['Записи'])||[]).slice(0,10).map(x=>({num:x['Номер'], date:x['Дата'], court:x['Суд'], sum:num(x['СуммИск']), other:names(x['Ист']), url:safeUrl(x['СтрКАД'])}))},
-      act:{n:num(act.data['ЗапВсего']), sum:num(act.data['ОбщСуммИск'])},
-      pl:{n:num(pl.data['ЗапВсего']), sum:num(pl.data['ОбщСуммИск'])},
-      enf:{n:enfRows.length, more:num(enf.data && enf.data['СтрВсего'])>1,
-           debt:enfRows.reduce((a,x)=>a+num(x['СумДолг']),0), rest:enfRows.reduce((a,x)=>a+num(x['ОстЗадолж']),0),
-           rows:enfRows.slice(0,10).map(x=>({num:x['ИспПрНомер'], date:x['ИспПрДата'], what:x['ПредмИсп'], debt:num(x['СумДолг']), rest:num(x['ОстЗадолж'])}))},
-      bk:{n:num(bk.data['ЗапВсего']),
-          rows:((bk.data['Записи'])||[]).slice(0,10).map(x=>({date:x['Дата'], type:x['ТипНаим']||x['Тип'], caseNum:x['НомерДела'], court:x['Суд'], url:safeUrl(x['URL'])}))},
-    };
-    /* попутно — то, что сервис вернул о самом контрагенте */
-    if(!S.cp && S.auto.who.name) S.cp = S.auto.who.name;
-    if(!S.ogrn && S.auto.who.ogrn) S.ogrn = S.auto.who.ogrn;
-    if(S.auto.who.reg){
-      const yrs = (Date.now() - new Date(S.auto.who.reg).getTime()) / (365.25*864e5);
-      if(isFinite(yrs)) S.age = yrs < 1 ? '<1' : (yrs < 3 ? '1-3' : '>3');
+    const d = await extCall('check', inn, 120000);
+    const keepEnf = S.auto && S.auto.inn === inn ? S.auto.enf : null;
+    const eg = d.egrul ? {name:str(d.egrul.name,200), full:str(d.egrul.full,300), ogrn:str(d.egrul.ogrn,15), kpp:str(d.egrul.kpp,9),
+                          reg:str(d.egrul.reg,10), region:str(d.egrul.region,80), head:str(d.egrul.head,200), ended:str(d.egrul.ended,10)} : null;
+    if(eg){
+      if(eg.name && (!S.cp || normName(S.cp) !== normName(eg.name))) S.cpDoc = S.cp, S.cp = shortForm(eg.name);
+      if(eg.ogrn) S.ogrn = eg.ogrn;
+      const m = eg.reg.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+      if(m){ const yrs = (Date.now() - new Date(+m[3], +m[2]-1, +m[1]).getTime()) / (365.25*864e5); S.age = yrs < 1 ? '<1' : (yrs < 3 ? '1-3' : '>3'); }
     }
+    const pb = d.pb ? {name:str(d.pb.name,200), status:str(d.pb.status,120), liquidated:!!d.pb.liquidated, invalid:Number(d.pb.invalid)||0,
+        debtToBailiff:Number(d.pb.debtToBailiff)||0, noReports:Number(d.pb.noReports)||0, okved:str(d.pb.okved,12), okvedName:str(d.pb.okvedName,250),
+        capital:Number(d.pb.capital)||0, address:str(d.pb.address,250), massAddr:Number(d.pb.massAddr)||0, regimes:(d.pb.regimes||[]).slice(0,5).map(x=>str(x,6)),
+        staff:d.pb.staff===null||d.pb.staff===undefined ? null : Number(d.pb.staff)||0, staffYear:Number(d.pb.staffYear)||0,
+        taxes:Number(d.pb.taxes)||0, taxesYear:Number(d.pb.taxesYear)||0,
+        fin:(d.pb.fin||[]).slice(0,3).map(x=>({year:Number(x.year)||0, revenue:Number(x.revenue)||0, expense:Number(x.expense)||0})),
+        arrears:Number(d.pb.arrears)||0, arrearsSum:Number(d.pb.arrearsSum)||0, offenses:Number(d.pb.offenses)||0} : null;
+    S.auto = {at:d.at, inn, errors:d.errors||{}, enf:keepEnf||null, egrul:eg, pb,
+      kad: d.kad ? {def:{n:Number(d.kad.def.n)||0, nYear:Number(d.kad.def.nYear)||0,
+                         rows:(d.kad.def.rows||[]).slice(0,15).map(x=>({num:str(x.num,60), url:safeUrl(x.url), date:str(x.date,20), court:str(x.court,160),
+                               plaintiffs:(x.plaintiffs||[]).slice(0,4).map(n=>str(n,160))}))},
+                    pl:{n:Number(d.kad.pl.n)||0}} : null,
+      bk: d.bk ? {n:Number(d.bk.n)||0, rows:(d.bk.rows||[]).slice(0,10).map(x=>({name:str(x.name,200), status:str(x.status,300), statusDate:str(x.statusDate,10),
+                    active:!!x.active, caseNum:str(x.caseNum,60), procedure:str(x.procedure,120), procedureDate:str(x.procedureDate,10), manager:str(x.manager,120)}))} : null,
+    };
     autoNotes();
-    toast('Суды, приставы и банкротство проверены');
-  }catch(e){
-    autoErr = (e && e.message==='Failed to fetch') ? 'не удалось связаться с api.checko.ru — проверьте интернет и не блокирует ли запрос корпоративная сеть' : String((e && e.message) || e);
-  }
+    const bad = Object.values(S.auto.errors).filter(Boolean);
+    if(bad.length) autoErr = bad.join('; '); else toast('Суды и банкротство проверены');
+  }catch(e){ autoErr = String((e && e.message) || e); }
   autoBusy = false; render();
+}
+async function fsspOpen(){
+  const inn = digits(S.inn);
+  if(![10,12].includes(inn.length)){ toast('Укажите ИНН контрагента: 10 или 12 цифр'); return; }
+  if(!extVersion()){ toast('Расширение не установлено — см. вкладку «Настройки»'); return; }
+  try{ await extCall('fssp', inn, 15000); fsspWait = true; render(); }
+  catch(e){ autoErr = String((e && e.message) || e); render(); }
+}
+function takeFssp(d){
+  if(!d || d.inn !== digits(S.inn)){ toast('Пришёл результат ФССП по другому ИНН — пропущен'); return; }
+  fsspWait = false;
+  S.auto = S.auto && S.auto.inn === d.inn ? S.auto : {at:d.at, inn:d.inn, errors:{}, kad:null, bk:null};
+  S.auto.enf = {at:d.at, n:Number(d.n)||0, open:Number(d.open)||0, debt:Number(d.debt)||0, more:!!d.more, manual:!!d.manual,
+    rows:(d.rows||[]).slice(0,30).map(x=>({ip:str(x.ip,200), subject:str(x.subject,300), ended:str(x.ended,200), dept:str(x.dept,200), sum:Number(x.sum)||0}))};
+  autoNotes(); render(); toast('Результат ФССП получен');
 }
 
 /* результат раскладывается по позициям 9–11 чек-листа. Квалификацию при находках даёт
    комплаенс-менеджер; «соответствует» ставится само только там, где не найдено ничего. */
 function autoNotes(){
   const a = S.auto; if(!a) return;
-  const head = `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — Checko`;
   const put = (n, text, clean)=>{
     const c = S.cl[n] || {};
     if(!(c.note||'').trim() || c.note.startsWith(AUTO_MARK)) c.note = text;
     if(!c.q && clean) c.q = 'ok';
     S.cl[n] = c;
   };
-  const last = a.def.rows.slice(0,5).map(x=>`${x.num} от ${rus(x.date)}${x.sum?`, ${money(x.sum)} ₽`:''}${x.other?`, истец ${x.other}`:''}`).join('; ');
-  put(9, `${head} (данные картотеки арбитражных дел). Ответчик: дел — ${a.def.n}, сумма требований — ${money(a.def.sum)} ₽; из них не завершено — ${a.act.n} на ${money(a.act.sum)} ₽. Истец: дел — ${a.pl.n} на ${money(a.pl.sum)} ₽.${last?` Последние дела, где контрагент ответчик: ${last}.`:''} Суды общей юрисдикции сервис не охватывает.`, a.def.n===0);
-  const enfLast = a.enf.rows.slice(0,5).map(x=>`${x.num} от ${rus(x.date)}: ${x.what||'предмет не указан'}, остаток ${money(x.rest)} ₽`).join('; ');
-  put(10, `${head} (данные банка исполнительных производств ФССП). Производств — ${a.enf.more?'более ':''}${a.enf.n}, сумма долга — ${money(a.enf.debt)} ₽, остаток задолженности — ${money(a.enf.rest)} ₽.${enfLast?` Последние: ${enfLast}.`:''}`, a.enf.n===0);
-  const bkLast = a.bk.rows.slice(0,5).map(x=>`${rus(x.date)} — ${x.type||'сообщение'}${x.caseNum?`, дело ${x.caseNum}`:''}`).join('; ');
-  put(11, `${head} (данные ЕФРСБ). Сообщений о банкротстве — ${a.bk.n}.${bkLast?` Последние: ${bkLast}.`:''}`, a.bk.n===0);
+  if(a.egrul){
+    const e = a.egrul;
+    put(1, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — ЕГРЮЛ (egrul.nalog.ru). ${e.full||e.name}, ОГРН ${e.ogrn}${e.kpp?`, КПП ${e.kpp}`:''}, дата регистрации ${e.reg}${e.region?`, ${e.region}`:''}.${e.head?` ${nodot(e.head)}.`:''}${e.ended?` Деятельность прекращена ${e.ended}.`:' Записи о прекращении деятельности нет.'} ОКВЭД и размер уставного капитала — по выписке.`, false);
+  }
+  if(a.pb){
+    const p = a.pb, src = `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — «Прозрачный бизнес» (pb.nalog.ru).`;
+    const RGM = {usn:'УСН', eshn:'ЕСХН', envd:'ЕНВД', spr:'соглашение о разделе продукции', ausn:'АУСН'};
+    const f = p.fin[0], r = calc();
+    put(2, `${src} ${p.invalid ? 'Есть отметка о недостоверности сведений — подробности в выписке из ЕГРЮЛ.' : 'Отметок о недостоверности сведений нет.'}`, !p.invalid);
+    put(3, `${src} Статус: ${p.status || 'не указан'}${p.liquidated ? '; организация ликвидирована' : ''}.`, !p.liquidated && /действующ/i.test(p.status));
+    put(6, `${src} Адрес: ${p.address || 'не указан'}; ${p.massAddr ? 'отнесён к адресам массовой регистрации' : 'к адресам массовой регистрации не отнесён'}. Дисквалификация руководителя и «массовость» руководителя и учредителей проверяются отдельно.`, false);
+    put(19, `${src} Специальные налоговые режимы: ${p.regimes.length ? p.regimes.map(x=>RGM[x]||x).join(', ') : 'не применяет — общая система, плательщик НДС'}.`, false);
+    put(20, `${src} Сведения о недоимке: ${p.arrears ? `записей — ${p.arrears}${p.arrearsSum?` на ${money(p.arrearsSum)} ₽`:''}` : 'нет'}. Задолженность, направленная на взыскание приставу: ${p.debtToBailiff ? 'есть' : 'нет'}. Налоговая отчётность более года: ${p.noReports ? 'не представляется' : 'представляется'}. Сальдо ЕНС сервис не показывает.`, false);
+    put(22, `${src} Среднесписочная численность${p.staffYear?` за ${p.staffYear} год`:''} — ${p.staff===null?'нет данных':p.staff}. Уплачено налогов и взносов${p.taxesYear?` за ${p.taxesYear} год`:''} — ${money(p.taxes)} ₽${f && f.revenue ? `; это ${(p.taxes/f.revenue*100).toFixed(2).replace('.',',')} % доходов за ${f.year} год` : ''}.`, false);
+    if(p.fin.length) put(23, `${src} ${p.fin.map(x=>`${x.year} год: доходы ${money(x.revenue)} ₽, расходы ${money(x.expense)} ₽, разница ${money(x.revenue-x.expense)} ₽`).join('; ')}. Уставный капитал — ${money(p.capital)} ₽. Чистые активы, дебиторская и кредиторская задолженность — по ГИР БО.`, false);
+    if(f && f.revenue && r.sum) put(24, `${src} Сумма сделки ${money(r.sum)} ₽ составляет ${(r.sum/f.revenue*100).toFixed(1).replace('.',',')} % доходов контрагента за ${f.year} год (${money(f.revenue)} ₽). Соотношение с активами — по ГИР БО.`, false);
+  }
+  if(a.kad){
+    const k = a.kad;
+    const last = k.def.rows.slice(0,5).map(x=>`${x.num} от ${x.date}${x.plaintiffs.length?`, истец ${x.plaintiffs.join(', ')}`:''}`).join('; ');
+    put(9, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — kad.arbitr.ru. Ответчик: дел — ${k.def.n}, из них за последние 12 месяцев — ${k.def.nYear}. Истец: дел — ${k.pl.n}.${last?` Последние дела, где контрагент ответчик: ${nodot(last)}.`:''} Суммы требований в списке картотеки не показываются — они в карточках дел. Суды общей юрисдикции не охвачены.`, k.def.n===0);
+  }
+  if(a.bk){
+    const rows = a.bk.rows.map(x=>`${x.status||'статус не указан'}${x.caseNum?`, дело ${x.caseNum}`:''}${x.procedure?`, ${x.procedure.toLowerCase()} с ${rus(x.procedureDate)}`:''}${x.manager?`, арбитражный управляющий ${x.manager}`:''}`).join('; ');
+    put(11, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — ЕФРСБ (bankrot.fedresurs.ru). ${a.bk.n ? `В реестре должников найдено записей: ${a.bk.n}. ${nodot(rows)}.` : 'В реестре должников контрагент не значится.'}`, a.bk.n===0);
+  }
+  if(a.enf){
+    const e = a.enf;
+    const last = e.rows.filter(x=>!x.ended).slice(0,5).map(x=>`${x.ip}: ${x.subject}`).join('; ');
+    put(10, `${AUTO_MARK} ${stamp(e.at)}, ИНН ${a.inn}, источник — банк данных исполнительных производств ФССП. ${e.n
+      ? `Производств в выдаче — ${e.n}${e.more?' (показана первая страница, есть ещё)':''}, не окончено — ${e.open} на ${money(e.debt)} ₽.${last?` Неоконченные: ${nodot(last)}.`:''}`
+      : `По ИНН ничего не найдено${e.manual?' (отмечено вручную по результату поиска на сайте)':''}.`}`, e.n===0);
+  }
 }
 
 function autoReportHtml(){
   const a = S.auto; if(!a) return '';
   const tbl = (head, rows)=> rows.length ? `<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:10pt;width:100%"><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr>${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>` : '<p>Записей нет.</p>';
   return `<html><head><meta charset="utf-8"><title>Справка автопроверки</title></head><body style="font-family:'Times New Roman',serif;font-size:12pt">
-<p style="text-align:center;font-weight:bold">Справка о проверке контрагента по судам, исполнительным производствам и банкротству</p>
-<p>Контрагент: ${esc(S.cp||a.who.name||'—')}, ИНН ${esc(a.inn)}${a.who.ogrn?`, ОГРН ${esc(a.who.ogrn)}`:''}${a.who.status?`. Статус: ${esc(a.who.status)}`:''}.<br>
-Дата и время запроса: ${esc(stamp(a.at))}. Источник: API Checko (api.checko.ru).</p>
-<p><b>Арбитражные дела.</b> Ответчик: ${a.def.n} на ${money(a.def.sum)} ₽, из них не завершено ${a.act.n} на ${money(a.act.sum)} ₽. Истец: ${a.pl.n} на ${money(a.pl.sum)} ₽.</p>
-${tbl(['Дело','Дата','Суд','Сумма, ₽','Истец'], a.def.rows.map(x=>[x.num, rus(x.date), x.court, money(x.sum), x.other]))}
-<p><b>Исполнительные производства.</b> ${a.enf.more?'Более ':''}${a.enf.n}, сумма долга ${money(a.enf.debt)} ₽, остаток ${money(a.enf.rest)} ₽.</p>
-${tbl(['Производство','Дата','Предмет','Долг, ₽','Остаток, ₽'], a.enf.rows.map(x=>[x.num, rus(x.date), x.what, money(x.debt), money(x.rest)]))}
-<p><b>ЕФРСБ.</b> Сообщений: ${a.bk.n}.</p>
-${tbl(['Дата','Сообщение','Дело','Суд'], a.bk.rows.map(x=>[rus(x.date), x.type, x.caseNum, x.court]))}
-<p style="font-size:10pt">В таблицах — не более десяти последних записей по каждому источнику. Справка не заменяет выгрузку из первоисточника там, где Регламент требует её приобщить к досье (п. 7.3).</p>
+<p style="text-align:center;font-weight:bold">Справка о проверке контрагента по арбитражным делам, банкротству и исполнительным производствам</p>
+<p>Контрагент: ${esc(S.cp||'—')}, ИНН ${esc(a.inn)}${S.ogrn?`, ОГРН ${esc(S.ogrn)}`:''}.<br>Дата и время запроса: ${esc(stamp(a.at))}. Сведения получены с сайтов-первоисточников в браузере комплаенс-менеджера.</p>
+${a.egrul?`<p><b>ЕГРЮЛ (egrul.nalog.ru).</b> ${esc(a.egrul.full||a.egrul.name)}, ОГРН ${esc(a.egrul.ogrn)}, дата регистрации ${esc(a.egrul.reg)}${a.egrul.head?`. ${esc(nodot(a.egrul.head))}`:''}${a.egrul.ended?`. Деятельность прекращена ${esc(a.egrul.ended)}`:''}.</p>`:''}
+${a.pb?`<p><b>«Прозрачный бизнес» (pb.nalog.ru).</b> Статус: ${esc(a.pb.status)}. Недостоверность сведений: ${a.pb.invalid?'есть':'нет'}. Адрес массовой регистрации: ${a.pb.massAddr?'да':'нет'}. ОКВЭД ${esc(a.pb.okved)} ${esc(a.pb.okvedName)}. Уставный капитал ${money(a.pb.capital)} ₽. Среднесписочная численность: ${a.pb.staff===null?'нет данных':a.pb.staff}. Уплачено налогов: ${money(a.pb.taxes)} ₽. Сведения о недоимке: ${a.pb.arrears?'есть':'нет'}; задолженность у приставов: ${a.pb.debtToBailiff?'есть':'нет'}.</p>
+${tbl(['Год','Доходы, ₽','Расходы, ₽'], a.pb.fin.map(x=>[x.year, money(x.revenue), money(x.expense)]))}`:''}
+${a.kad?`<p><b>Арбитражные дела (kad.arbitr.ru).</b> Ответчик: ${a.kad.def.n}, из них за последние 12 месяцев — ${a.kad.def.nYear}. Истец: ${a.kad.pl.n}.</p>
+${tbl(['Дело','Дата','Суд','Истец'], a.kad.def.rows.map(x=>[x.num, x.date, x.court, x.plaintiffs.join(', ')]))}`:'<p><b>Арбитражные дела.</b> Не проверялись.</p>'}
+${a.bk?`<p><b>ЕФРСБ (bankrot.fedresurs.ru).</b> Записей в реестре должников: ${a.bk.n}.</p>
+${tbl(['Должник','Статус','Дело','Процедура','Арбитражный управляющий'], a.bk.rows.map(x=>[x.name, x.status, x.caseNum, `${x.procedure} ${rus(x.procedureDate)}`, x.manager]))}`:'<p><b>ЕФРСБ.</b> Не проверялся.</p>'}
+${a.enf?`<p><b>Исполнительные производства (ФССП), запрос ${esc(stamp(a.enf.at))}.</b> В выдаче: ${a.enf.n}${a.enf.more?' (первая страница)':''}, не окончено ${a.enf.open} на ${money(a.enf.debt)} ₽.</p>
+${tbl(['Производство','Предмет исполнения','Окончание','Отдел'], a.enf.rows.map(x=>[x.ip, x.subject, x.ended, x.dept]))}`:'<p><b>Исполнительные производства.</b> Не проверялись.</p>'}
+<p style="font-size:10pt">В таблицах — последние записи по каждому источнику. Справка не заменяет выгрузку из первоисточника там, где Регламент требует приобщить её к досье (п. 7.3).</p>
 </body></html>`;
 }
 
 function autoCard(){
-  const a = S.auto, inn = digits(S.inn);
-  const stale = a && a.inn !== inn;
+  const inn = digits(S.inn);
+  const a = S.auto && S.auto.inn === inn ? S.auto : null;
   const link = (u,t)=> u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)} ↗</a>` : esc(t);
   let body;
-  if(!apiKey()){
-    body = `<p style="margin:0 0 8px">Чтобы приложение само собирало арбитражные дела, исполнительные производства и сообщения о банкротстве, внесите ключ API на вкладке «Настройки». Без ключа эти три позиции проверяются вручную по ссылкам:</p>
+  if(!extVersion()){
+    body = `<p style="margin:0 0 8px">Приложение умеет само собирать арбитражные дела, сведения ЕФРСБ и исполнительные производства, но для этого нужно расширение для Chrome — как его поставить, написано на вкладке «Настройки». Пока расширения нет, позиции 9–11 проверяются вручную:</p>
     <div class="btnrow" style="margin:0">
       <a class="btn" href="https://kad.arbitr.ru/" target="_blank" rel="noopener noreferrer">Картотека арбитражных дел ↗</a>
       <a class="btn" href="https://fssp.gov.ru/iss/ip" target="_blank" rel="noopener noreferrer">ФССП ↗</a>
       <a class="btn" href="https://bankrot.fedresurs.ru/bankrupts?searchString=${encodeURIComponent(inn)}" target="_blank" rel="noopener noreferrer">ЕФРСБ по ИНН ↗</a>
-      <button class="btn ghost" data-view="orgs">Внести ключ</button>
+      <button class="btn ghost" data-view="orgs">Как поставить расширение</button>
     </div>`;
   } else if(autoBusy){
-    body = `<p class="muted" style="margin:0">Запрашиваю суды, приставов и ЕФРСБ…</p>`;
+    body = `<p class="muted" style="margin:0">Открываю ЕГРЮЛ, «Прозрачный бизнес», картотеку арбитражных дел и ЕФРСБ в фоновых вкладках, это занимает 30–40 секунд. Вкладки закроются сами.</p>`;
   } else {
-    body = `${autoErr?`<div class="verdict v-neg"><b>Проверка не прошла</b>${esc(autoErr)}</div>`:''}
-    ${a && !stale ? `
-    <div class="scroll"><table class="t"><tbody>
-      <tr><th style="width:34%">Арбитражные дела, ответчик</th><td><b>${a.def.n}</b> на ${money(a.def.sum)} ₽; не завершено — <b>${a.act.n}</b> на ${money(a.act.sum)} ₽</td></tr>
-      <tr><th>Арбитражные дела, истец</th><td>${a.pl.n} на ${money(a.pl.sum)} ₽</td></tr>
-      <tr><th>Исполнительные производства</th><td><b>${a.enf.more?'более ':''}${a.enf.n}</b>, долг ${money(a.enf.debt)} ₽, остаток ${money(a.enf.rest)} ₽</td></tr>
-      <tr><th>Сообщения в ЕФРСБ</th><td><b>${a.bk.n}</b></td></tr>
+    body = `${autoErr?`<div class="verdict v-neg"><b>Часть проверки не прошла</b>${esc(autoErr)}</div>`:''}
+    ${a ? `<div class="scroll"><table class="t"><tbody>
+      ${a.egrul?`<tr><th style="width:34%">ЕГРЮЛ</th><td>${esc(a.egrul.name)}, ОГРН ${esc(a.egrul.ogrn)}, зарегистрировано ${esc(a.egrul.reg)}${a.egrul.ended?` · <b>деятельность прекращена ${esc(a.egrul.ended)}</b>`:''}</td></tr>`:''}
+      ${a.pb?`<tr><th style="width:34%">«Прозрачный бизнес»</th><td>${esc(a.pb.status||'статус не указан')}${a.pb.invalid?' · <b>недостоверность сведений</b>':''}${a.pb.massAddr?' · <b>массовый адрес</b>':''}${a.pb.arrears||a.pb.debtToBailiff?' · <b>налоговая задолженность</b>':''}<br><span class="muted">ОКВЭД ${esc(a.pb.okved)} ${esc(a.pb.okvedName)}</span><br>численность — ${a.pb.staff===null?'нет данных':a.pb.staff}, налогов уплачено — ${money(a.pb.taxes)} ₽${a.pb.fin[0]?`, доходы за ${a.pb.fin[0].year} — ${money(a.pb.fin[0].revenue)} ₽, расходы — ${money(a.pb.fin[0].expense)} ₽`:''}</td></tr>`:''}
+      <tr><th style="width:34%">Арбитражные дела, ответчик</th><td>${a.kad?`<b>${a.kad.def.n}</b>, из них за последние 12 месяцев — <b>${a.kad.def.nYear}</b>`:'<span class="muted">нет данных</span>'}</td></tr>
+      <tr><th>Арбитражные дела, истец</th><td>${a.kad?a.kad.pl.n:'<span class="muted">нет данных</span>'}</td></tr>
+      <tr><th>Банкротство (ЕФРСБ)</th><td>${a.bk?(a.bk.n?`<b>найдено записей: ${a.bk.n}</b>`:'в реестре должников не значится'):'<span class="muted">нет данных</span>'}</td></tr>
+      <tr><th>Исполнительные производства</th><td>${a.enf?(a.enf.n?`<b>${a.enf.n}</b>${a.enf.more?' на первой странице':''}, не окончено — <b>${a.enf.open}</b> на ${money(a.enf.debt)} ₽`:'по ИНН ничего не найдено'):'<span class="muted">не проверялись — нужна капча, см. кнопку ниже</span>'}</td></tr>
     </tbody></table></div>
-    ${a.def.rows.length?`<h3 style="margin-top:12px">Последние дела, где контрагент ответчик</h3><ul class="tight">${a.def.rows.map(x=>`<li>${link(x.url,x.num)} от ${rus(x.date)}${x.sum?`, ${money(x.sum)} ₽`:''}${x.other?` — истец ${esc(x.other)}`:''}</li>`).join('')}</ul>`:''}
-    ${a.enf.rows.length?`<h3 style="margin-top:12px">Исполнительные производства</h3><ul class="tight">${a.enf.rows.map(x=>`<li>${esc(x.num)} от ${rus(x.date)}: ${esc(x.what||'предмет не указан')}, остаток ${money(x.rest)} ₽</li>`).join('')}</ul>`:''}
-    ${a.bk.rows.length?`<h3 style="margin-top:12px">Сообщения ЕФРСБ</h3><ul class="tight">${a.bk.rows.map(x=>`<li>${rus(x.date)} — ${link(x.url, x.type||'сообщение')}${x.caseNum?`, дело ${esc(x.caseNum)}`:''}</li>`).join('')}</ul>`:''}
-    <div class="hint">Проверено ${esc(stamp(a.at))}. Итоги внесены в позиции 9–11 чек-листа; где ничего не найдено, стоит «соответствует», остальное квалифицируете вы.</div>`
-    : `<p class="muted" style="margin:0 0 4px">${stale?'ИНН изменился после прошлой проверки — запустите её заново.':'По ИНН контрагента приложение соберёт арбитражные дела, исполнительные производства и сообщения ЕФРСБ и разложит их по позициям 9–11.'}</p>`}
+    ${a.bk && a.bk.rows.length?`<h3 style="margin-top:12px">Реестр должников</h3><ul class="tight">${a.bk.rows.map(x=>`<li>${esc(x.status)}${x.caseNum?`, дело ${esc(x.caseNum)}`:''}${x.procedure?` — ${esc(x.procedure.toLowerCase())} с ${rus(x.procedureDate)}`:''}</li>`).join('')}</ul>`:''}
+    ${a.kad && a.kad.def.rows.length?`<h3 style="margin-top:12px">Последние дела, где контрагент ответчик</h3><ul class="tight">${a.kad.def.rows.map(x=>`<li>${link(x.url,x.num)} от ${esc(x.date)}${x.plaintiffs.length?` — истец ${esc(x.plaintiffs.join(', '))}`:''}<span class="muted"> · ${esc(x.court)}</span></li>`).join('')}</ul>`:''}
+    ${a.enf && a.enf.rows.length?`<h3 style="margin-top:12px">Исполнительные производства</h3><ul class="tight">${a.enf.rows.slice(0,10).map(x=>`<li>${esc(x.ip)}: ${esc(x.subject)}${x.ended?` <span class="muted">· окончено: ${esc(x.ended)}</span>`:''}</li>`).join('')}</ul>`:''}
+    <div class="hint">Проверено ${esc(stamp(a.at))}. Итоги внесены в позиции чек-листа, которые входят в уровень: 1–3, 6, 9–11, 19, 20, 22–24. Где источник закрывает позицию целиком и ничего не найдено, стоит «соответствует»; остальное квалифицируете вы.</div>`
+    : `<p class="muted" style="margin:0 0 4px">По ИНН контрагента расширение соберёт арбитражные дела и сведения о банкротстве и разложит их по позициям 9 и 11. Приставы проверяются отдельной кнопкой: там нужно ввести код с картинки.</p>`}
+    ${fsspWait?`<div class="verdict v-cond" style="margin-top:10px"><b>Жду результат с сайта ФССП</b>В открывшейся вкладке нажмите «Найти» и введите код с картинки. Результат вернётся сюда сам.</div>`:''}
     <div class="btnrow">
-      <button class="btn primary" data-act="auto-run">${a && !stale?'Проверить заново':'Проверить по ИНН'}</button>
-      ${a && !stale?`<button class="btn" data-act="auto-doc">Скачать справку для досье</button>`:''}
+      <button class="btn primary" data-act="auto-run">${a && (a.kad||a.bk)?'Проверить суды и банкротство заново':'Проверить суды и банкротство'}</button>
+      <button class="btn" data-act="fssp-run">Проверить приставов (ФССП)</button>
+      ${a?`<button class="btn" data-act="auto-doc">Скачать справку для досье</button>`:''}
     </div>`;
   }
   return `<div class="card">
-    <div class="hd"><h2>Суды, приставы, банкротство</h2><span class="ref">позиции 9–11 · автоматически</span></div>
+    <div class="hd"><h2>Суды, банкротство, приставы</h2><span class="ref">ЕГРЮЛ, «Прозрачный бизнес», суды, ЕФРСБ, ФССП · через расширение${extVersion()?` ${esc(extVersion())}`:''}</span></div>
     ${body}
   </div>`;
 }
@@ -1316,6 +1651,7 @@ function renderS4(){
   }).join('');
 
   document.getElementById('s4').innerHTML = `
+  ${hintsCard()}
   <div class="card">
     <div class="hd"><h2>Критические факторы</h2><span class="ref">Приложение № 6, раздел 1</span></div>
     <p class="small muted" style="margin-top:0">При отсутствии прямого правового запрета приоритет отдаётся квалификации как красного флага или преодолимого стоп-фактора с митигацией.</p>
@@ -1376,7 +1712,7 @@ function concText(){
   L.push(`Организация Группы: ${orgName()}${o.inn?`, ИНН ${o.inn}`:''}`);
   L.push(`Порог проверки и границы уровней: ${money(o.porog)} / ${money(o.base)} / ${money(o.std)} ₽${o.prikaz?` (приказ ${o.prikaz})`:''}`);
   L.push(`Контрагент: ${S.cp||'—'}, ИНН ${S.inn||'—'}${S.ogrn?`, ОГРН ${S.ogrn}`:''}`);
-  L.push(`Предмет и сумма договора: ${r.subj.t}; ${money(r.own)} ₽ с НДС`);
+  L.push(`Предмет и сумма договора: ${r.subj.t}${S.dogovor?` (договор ${S.dogovor})`:''}; ${money(r.own)} ₽ с НДС`);
   if(S.hasContracts==='yes' && r.contracts.length){
     L.push(`Действующие договоры с контрагентом (по сведениям инициатора), всего на ${money(r.contractsTotal)} ₽:`);
     r.contracts.forEach((c,i)=>L.push(`  ${i+1}) ${c.org||'организация не указана'} — ${c.what||'реквизиты не указаны'}; ${money(c.sum)} ₽${c.linked?'; взаимосвязан с новой сделкой':''}`));
@@ -1398,8 +1734,11 @@ function concText(){
     L.push(`  ${n}. ${it.t} — ${q}.${(c.note||'').trim()?` ${c.note.trim()}`:''}`);
   });
   if(S.auto && !r.scope.includes(9)){
-    const a = S.auto;
-    L.push(`  Дополнительно, вне объёма уровня (автопроверка ${stamp(a.at)}, источник — Checko): арбитражные дела, ответчик — ${a.def.n} на ${money(a.def.sum)} ₽, не завершено — ${a.act.n}; исполнительные производства — ${a.enf.more?'более ':''}${a.enf.n}, остаток ${money(a.enf.rest)} ₽; сообщения ЕФРСБ — ${a.bk.n}.`);
+    const a = S.auto, bits = [];
+    if(a.kad) bits.push(`арбитражные дела (kad.arbitr.ru): ответчик — ${a.kad.def.n}, из них за 12 месяцев — ${a.kad.def.nYear}, истец — ${a.kad.pl.n}`);
+    if(a.bk) bits.push(`ЕФРСБ: ${a.bk.n ? `записей в реестре должников — ${a.bk.n}` : 'в реестре должников не значится'}`);
+    if(a.enf) bits.push(`ФССП: производств — ${a.enf.n}, не окончено — ${a.enf.open} на ${money(a.enf.debt)} ₽`);
+    if(bits.length) L.push(`  Дополнительно, вне объёма уровня (автопроверка ${stamp(a.at)}): ${bits.join('; ')}.`);
   }
   nl();
   L.push('2. ПРОФИЛЬНЫЕ МНЕНИЯ ПОДРАЗДЕЛЕНИЙ');
@@ -1584,16 +1923,17 @@ function renderOrgs(){
   </div>
 
   <div class="card">
-    <div class="hd"><h2>Автопроверка: суды, приставы, банкротство</h2><span class="ref">API Checko</span></div>
-    <p class="small muted" style="margin-top:0">Картотека арбитражных дел, банк данных ФССП и ЕФРСБ не отдают сведения странице в браузере: открытого API у них нет, формы закрыты капчей. Приложение берёт эти данные через сервис Checko. Ключ выдаётся в личном кабинете на checko.ru после регистрации; лимит запросов зависит от тарифа, одна проверка контрагента расходует пять запросов.</p>
-    <label class="f" style="max-width:460px">Ключ API
-      <input type="password" data-api="1" value="${esc(apiKey())}" placeholder="вставьте ключ из личного кабинета" autocomplete="off">
-    </label>
-    <div class="btnrow">
-      <a class="btn" href="https://checko.ru/integration/api" target="_blank" rel="noopener noreferrer">Получить ключ на checko.ru ↗</a>
-      <button class="btn ghost danger" data-act="api-clear">Удалить ключ</button>
-    </div>
-    <div class="hint">Ключ хранится только в этом браузере и не попадает ни в ссылки, ни в выгрузки. При проверке в Checko уходит ИНН контрагента и больше ничего.</div>
+    <div class="hd"><h2>Расширение для автопроверки</h2><span class="ref">${extVersion()?`установлено, версия ${esc(extVersion())}`:'не установлено'}</span></div>
+    <p class="small muted" style="margin-top:0">Картотека арбитражных дел, ЕФРСБ и ФССП отвечают только запросам из настоящего браузера со своих же страниц, поэтому обычная страница достать их не может. Расширение для Chrome делает это за вас: открывает сайт в фоновой вкладке, выполняет поиск по ИНН и возвращает результат сюда. Сторонним сервисам ничего не уходит, ключи и регистрация не нужны. Код с картинки на сайте ФССП вводите вы сами.</p>
+    ${extVersion()?`<div class="verdict v-ok" style="margin-bottom:0"><b>Расширение работает</b>Кнопки проверки — на шаге «Чек-лист».</div>`:`
+    <ol class="tight" style="padding-left:20px;margin:0 0 4px">
+      <li>Скачайте архив приложения и распакуйте его в любую папку.</li>
+      <li>В Chrome откройте страницу <b>chrome://extensions</b> и включите «Режим разработчика» справа вверху.</li>
+      <li>Нажмите «Загрузить распакованное расширение» и укажите папку <b>extension</b> из распакованного архива.</li>
+      <li>Обновите эту страницу: здесь появится отметка «установлено».</li>
+    </ol>
+    <div class="btnrow"><a class="btn primary" href="${EXT_ZIP}" rel="noopener noreferrer">Скачать архив с расширением</a></div>
+    <div class="hint">Папку после установки не удаляйте: Chrome запускает расширение прямо из неё.</div>`}
   </div>`;
 }
 
@@ -1616,16 +1956,18 @@ function renderHelp(){
       <li>Уровень риска — по пяти критериям Приложения № 1, берётся наибольший (п. 5.2), затем применяются основания п. 5.3.</li>
       <li>Объём чек-листа: базовый — позиции 1–7 и 19–21, стандартный — 1–14 и 19–24, углублённый — все 28.</li>
       <li>Сроки Стадии 0 (1 / 2 / 5 рабочих дней), срок действия Заключения (12 / 12 / 6 месяцев), перечень документов для запроса.</li>
-      <li>Арбитражные дела, исполнительные производства и сообщения ЕФРСБ по ИНН контрагента — через API Checko, если на вкладке «Настройки» внесён ключ. Итог раскладывается по позициям 9–11 чек-листа.</li>
+      <li>Сделка из файла договора: стороны, ИНН, ОГРН, предмет, цена и аванс читаются из .docx или текстового PDF прямо в браузере, после чего сама запускается автопроверка.</li>
+      <li>Подсказки по Приложению № 6: если автопроверка нашла массовый адрес, численность 0–1, расходы выше доходов, недоимку, банкротство и подобное, на шаге «Стоп-факторы» появляется предложение отметить нужную позицию. Отмечает её комплаенс-менеджер.</li>
+      <li>Сведения ЕГРЮЛ и «Прозрачного бизнеса» (статус, недостоверность, массовый адрес, ОКВЭД, налоговый режим, недоимка, численность, уплаченные налоги, доходы и расходы за три года), арбитражные дела, сведения ЕФРСБ и исполнительные производства по ИНН контрагента — через расширение для Chrome (как поставить, написано на вкладке «Настройки»). Итог раскладывается по позициям 9–11 чек-листа. Код с картинки на сайте ФССП вводит человек.</li>
       <li>Обязательность привлечения профильных подразделений (п. 6.4) и налоговой оговорки (п. 12.5).</li>
       <li>Вывод по п. 7.9 и необходимость решения по п. 8.3, включая согласование управляющего партнёра.</li>
     </ul>
     <h3>Чего приложение не делает</h3>
     <ul class="tight">
       <li>Не ходит само в ЕГРЮЛ, «Прозрачный бизнес», ГИР БО и остальные реестры, кроме трёх перечисленных выше, — даёт ссылки, а результат вносит комплаенс-менеджер. Выгрузки и снимки экрана приобщаются к досье отдельно (п. 7.3).</li>
-      <li>Не квалифицирует находки автопроверки. «Соответствует» ставится само только там, где не найдено ничего; дела, производства и сообщения оцениваете вы. Суды общей юрисдикции автопроверка не охватывает.</li>
+      <li>Не квалифицирует находки автопроверки. «Соответствует» ставится само только там, где не найдено ничего; дела, производства и записи о банкротстве оцениваете вы. Суды общей юрисдикции автопроверка не охватывает, суммы требований по арбитражным делам картотека в списке не показывает.</li>
       <li>Не заменяет мотивировку. Там, где Регламент требует фактических показателей и обоснования, поле обязательно к заполнению.</li>
-      <li>Не хранит данные на сервере: пороги, перечень исключений, реестр и черновик лежат в localStorage этого браузера. Сделка от инициатора едет внутри ссылки или файлом. Наружу уходит одно — ИНН контрагента в Checko при автопроверке.</li>
+      <li>Не хранит данные на сервере: пороги, перечень исключений, реестр и черновик лежат в localStorage этого браузера. Сделка от инициатора едет внутри ссылки или файлом. При автопроверке ИНН контрагента уходит только на сами сайты-источники: kad.arbitr.ru, bankrot.fedresurs.ru и fssp.gov.ru.</li>
       <li>Не содержит пороговых значений: они устанавливаются приказами руководителей организаций и вносятся на вкладке «Настройки».</li>
     </ul>
     <h3>Понижение уровня</h3>
@@ -1688,7 +2030,7 @@ document.addEventListener('input', e=>{
     const x = EXCL[Number(t.dataset.ex)]; if(x){ x[t.dataset.k] = t.value; save(LS.excl,EXCL); }
     return;
   }
-  if(t.dataset.api !== undefined){ try{ localStorage.setItem(LS.api, t.value.trim()); }catch(e){} return; }
+
   if(t.dataset.note !== undefined){
     const n = t.dataset.note;
     S.cl[n] = Object.assign({}, S.cl[n], {note:t.value});
@@ -1714,7 +2056,7 @@ document.addEventListener('change', e=>{
     const n = Number(t.dataset.flag);
     S.flags = S.flags || [];
     if(t.checked){ if(!S.flags.includes(n)) S.flags.push(n); }
-    else S.flags = S.flags.filter(x=>x!==n);
+    else { S.flags = S.flags.filter(x=>x!==n); if(S.flagWhy) delete S.flagWhy[n]; }
     render(); return;
   }
   if(t.dataset.b !== undefined){ S[t.dataset.b] = t.checked; render(); return; }
@@ -1728,10 +2070,12 @@ document.addEventListener('change', e=>{
 });
 
 document.addEventListener('click', e=>{
-  const t = e.target.closest('[data-step],[data-go],[data-act],[data-view],[data-open],[data-del],[data-mon],[data-copyinn],[data-orgdel],[data-role],[data-ctdel],[data-rqreset],[data-rqxdel],[data-exdel]');
+  const t = e.target.closest('[data-step],[data-go],[data-act],[data-view],[data-open],[data-del],[data-mon],[data-copyinn],[data-orgdel],[data-role],[data-ctdel],[data-rqreset],[data-rqxdel],[data-exdel],[data-docpick],[data-hint]');
   if(!t) return;
 
   if(t.dataset.role){ ROLE = t.dataset.role; try{ localStorage.setItem(LS.role, ROLE); }catch(err){} render(); return; }
+  if(t.dataset.hint !== undefined){ takeHint(t.dataset.hint); return; }
+  if(t.dataset.docpick !== undefined){ applyParty(Number(t.dataset.docpick)); return; }
   if(t.dataset.ctdel !== undefined){ S.contracts.splice(Number(t.dataset.ctdel),1); render(); return; }
   if(t.dataset.rqreset !== undefined){ delete S.req.edit[t.dataset.rqreset]; render(); return; }
   if(t.dataset.rqxdel !== undefined){ S.req.extra.splice(Number(t.dataset.rqxdel),1); render(); return; }
@@ -1762,8 +2106,13 @@ document.addEventListener('click', e=>{
   const a = t.dataset.act;
   const r = calc();
 
-  if(a==='new'){ S = blank(); autoErr=''; step=1; render(); toast(ROLE==='init'?'Новая сделка':'Новая проверка'); return; }
+  if(a==='new'){ S = blank(); autoErr=''; fsspWait=false; docInfo=null; step=1; render(); toast(ROLE==='init'?'Новая сделка':'Новая проверка'); return; }
   if(a==='copy-skip'){ copy(skipSheetText()); return; }
+  if(a==='doc-load'){
+    const inp = document.createElement('input'); inp.type='file'; inp.accept='.docx,.pdf,.txt';
+    inp.onchange = ()=>{ const f = inp.files && inp.files[0]; if(f) loadContract(f); };
+    inp.click(); return;
+  }
   if(a==='ct-add'){ S.contracts.push({org:'', what:'', sum:'', linked:false}); render(); return; }
   if(a==='deal-link' || a==='deal-file'){
     S.fromInit = {who:S.initiator, at:today()};
@@ -1784,8 +2133,8 @@ document.addEventListener('click', e=>{
   }
   if(a==='init-link'){ copy(baseUrl()+'#init='+pack({orgs:ORGS, excl:EXCL})); return; }
   if(a==='ex-add'){ EXCL.push({inn:'', name:'', kind:'mono'}); save(LS.excl,EXCL); render(); return; }
-  if(a==='api-clear'){ try{ localStorage.removeItem(LS.api); }catch(err){} render(); toast('Ключ удалён'); return; }
   if(a==='auto-run'){ autoCheck(); return; }
+  if(a==='fssp-run'){ fsspOpen(); return; }
   if(a==='auto-doc'){ download(`Автопроверка_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${today()}.doc`, autoReportHtml(), 'application/msword'); return; }
   if(a==='rq-add'){ S.req.extra.push({t:''}); render(); const ta = document.querySelector(`[data-rqx="${S.req.extra.length-1}"]`); if(ta) ta.focus(); return; }
   if(a==='rq-reset'){ S.req.sel = {}; S.req.edit = {}; S.req.extra = []; render(); return; }
