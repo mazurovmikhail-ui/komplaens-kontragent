@@ -88,7 +88,7 @@
   /* ---- формы ---- */
   .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
   label.f{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
-  input[type=text],input[type=number],input[type=date],select,textarea{
+  input[type=text],input[type=number],input[type=date],input[type=password],input[type=email],select,textarea{
     font:inherit; font-size:14px; color:var(--ink); background:var(--surface-2);
     border:1px solid var(--line); border-radius:8px; padding:7px 9px; width:100%;
   }
@@ -185,6 +185,22 @@
   }
   .toast.on{opacity:1}
 
+  /* ---- роль ---- */
+  .role{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--surface-2)}
+  .role button{border:0;background:transparent;color:var(--muted);padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+  .role button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+  /* ---- строки запроса и договоров ---- */
+  .rq{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px dashed var(--line)}
+  .rq:last-of-type{border-bottom:0}
+  .rq > input[type=checkbox]{margin-top:9px;flex:0 0 auto;accent-color:var(--accent)}
+  .rq .body{flex:1;min-width:0}
+  .rq textarea{min-height:36px;font-size:13.5px;resize:none;overflow:hidden}
+  .rq.off textarea{opacity:.5}
+  .opt{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:7px;cursor:pointer;background:var(--surface-2);font-size:13.5px}
+  .opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+  .opt input{margin-top:3px;accent-color:var(--accent)}
+  .letter{font-family:var(--serif);font-size:14px;line-height:1.55;white-space:pre-wrap;border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:var(--surface-2)}
+
   @media print{
     header.top,.steps,.side,.btnrow,.noprint{display:none !important}
     body{background:#fff;color:#000}
@@ -201,10 +217,14 @@
       <h1>Комплаенс-проверка контрагента</h1>
       <small>Стадия 0 договорной работы · ГК «С.АН ГРУПП»</small>
     </div>
+    <div class="role" id="role" title="Кто работает с приложением">
+      <button data-role="init" aria-pressed="false">Инициатор</button>
+      <button data-role="km" aria-pressed="true">Комплаенс-менеджер</button>
+    </div>
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" data-view="check" aria-selected="true">Проверка</button>
       <button class="tab" role="tab" data-view="registry" aria-selected="false">Реестр</button>
-      <button class="tab" role="tab" data-view="orgs" aria-selected="false">Пороги</button>
+      <button class="tab" role="tab" data-view="orgs" aria-selected="false">Настройки</button>
       <button class="tab" role="tab" data-view="help" aria-selected="false">Справка</button>
     </div>
     <button class="icon-btn" id="theme" title="Тема">◐</button>
@@ -223,6 +243,7 @@
       <section id="s3" class="stepbody hidden"></section>
       <section id="s4" class="stepbody hidden"></section>
       <section id="s5" class="stepbody hidden"></section>
+      <section id="s6" class="stepbody hidden"></section>
     </div>
     <aside class="side" id="side"></aside>
   </div>
@@ -248,7 +269,8 @@
    Все ссылки на пункты и приложения — на этот Регламент.
    ====================================================================== */
 
-const LS = {orgs:'kpk.orgs.v1', reg:'kpk.registry.v1', draft:'kpk.draft.v1', theme:'kpk.theme'};
+const LS = {orgs:'kpk.orgs.v1', reg:'kpk.registry.v1', draft:'kpk.draft.v1', theme:'kpk.theme',
+            excl:'kpk.excl.v1', role:'kpk.role', api:'kpk.api.checko'};
 
 /* Приложение № 2 — пороговые значения. В коде не хранятся:
    вносятся на вкладке «Пороги» и остаются в браузере пользователя. */
@@ -395,35 +417,39 @@ const TERMS = [
   'Иные условия',
 ];
 
-/* Приложение № 3 — истребуемые документы */
+/* Приложение № 3 — истребуемые документы.
+   t  — формулировка для контрагента: без ссылок на Регламент, уходит в письмо как есть;
+   km — подсказка отправителю, когда позиция нужна (в письмо не попадает);
+   on — включена ли позиция в запрос по умолчанию. Позиции, которые Регламент разрешает
+        истребовать только при конкретном риске, по умолчанию выключены. */
 const DOCS = {
   A:[
-   'Краткая анкета контрагента — форма А (Приложение № 4)',
-   'Карточка организации с банковскими реквизитами — если реквизиты не указаны в проекте договора',
-   'Доверенность на подписанта — только если договор подписывает не лицо из ЕГРЮЛ (ЕГРИП)',
-   'Уведомление о применяемом налоговом режиме — только если контрагент не плательщик НДС либо применяет спецрежим',
+   {t:'Анкета контрагента (бланк приложен к письму)', km:'Форма анкеты зависит от уровня проверки — приложите к письму нужный бланк', on:true, anketa:true},
+   {t:'Карточка организации с банковскими реквизитами', km:'Не нужна, если реквизиты уже есть в проекте договора', on:true},
+   {t:'Доверенность на лицо, которое будет подписывать договор, — если договор подписывает не руководитель', km:'Только если подписант не значится в ЕГРЮЛ (ЕГРИП)', on:true},
+   {t:'Уведомление о применяемом налоговом режиме — если организация не является плательщиком НДС либо применяет специальный режим', km:'Только для неплательщиков НДС и спецрежимов', on:true},
   ],
   B:[
-   'Расширенная анкета контрагента — форма Б (Приложение № 4)',
-   'Решение (протокол) о назначении единоличного исполнительного органа — если срок полномочий не подтверждается ЕГРЮЛ и уставом',
-   'Устав в действующей редакции — только если копия недоступна в реестре ФНС либо содержит ограничения полномочий',
-   'Справка об исполнении обязанности по уплате налогов либо о сальдо ЕНС — при налоговых красных флагах или по мотивированному запросу',
-   'Декларация по НДС за последний квартал (титульный лист и раздел 1) с квитанцией — только при углублённой проверке либо конкретных налоговых флагах',
-   'Документ о правах на помещение по адресу деятельности — только при признаках недостоверности адреса',
-   'Лицензии, свидетельства, сертификаты, разрешения — только если сведений нет в открытых реестрах',
-   'Сведения об участниках с долей более 25 % — только если их нет в ЕГРЮЛ',
+   {t:'Решение (протокол) о назначении руководителя', km:'Если срок полномочий не подтверждается ЕГРЮЛ и уставом', on:true},
+   {t:'Устав в действующей редакции', km:'Только если копии нет в реестре ФНС либо устав ограничивает полномочия', on:false},
+   {t:'Справка налогового органа об исполнении обязанности по уплате налогов либо о сальдо единого налогового счёта', km:'При налоговых красных флагах или по мотивированному запросу', on:false},
+   {t:'Декларация по НДС за последний квартал (титульный лист и раздел 1) с квитанцией о приёме', km:'Только при углублённой проверке либо конкретных налоговых флагах', on:false, deep:true},
+   {t:'Документ о правах на помещение по адресу фактической деятельности (договор аренды, выписка из ЕГРН)', km:'Только при признаках недостоверности адреса', on:false},
+   {t:'Лицензии, свидетельства, сертификаты и разрешения, необходимые для исполнения договора', km:'Только если сведений нет в открытых реестрах', on:false},
+   {t:'Сведения об участниках (акционерах) с долей более 25 %', km:'Только если их нет в ЕГРЮЛ', on:false},
   ],
   V:[
-   'Выписка из реестра членов СРО сроком не более 1 месяца — для СМР, проектных и изыскательских работ',
-   'Подтверждение наличия специалистов в НРС: количество и номера реестровых записей, без персональных данных',
-   'Справка о материально-технической базе с указанием прав (собственность, аренда, лизинг)',
-   'Справка о численности персонала по категориям, без персональных данных работников',
-   'Референс-лист: исполненные аналогичные договоры за 3 года с контактами заказчиков',
-   'Расшифровка дебиторской и кредиторской задолженности — если по ГИР БО есть признаки финансовой неустойчивости',
-   'Сведения о привлекаемых субподрядчиках с указанием предмета и доли работ',
-   'Подтверждение согласия на включение в договор налоговой оговорки',
+   {t:'Выписка из реестра членов СРО, выданная не ранее чем за месяц до представления', km:'Для СМР, проектных и изыскательских работ', on:true, sk:true},
+   {t:'Сведения о специалистах, включённых в национальный реестр специалистов: количество и номера реестровых записей, без персональных данных', km:'Для СМР, проектных и изыскательских работ', on:true, sk:true},
+   {t:'Справка о материально-технической базе с указанием прав на неё (собственность, аренда, лизинг)', km:'', on:true},
+   {t:'Справка о численности персонала по категориям, без персональных данных работников', km:'', on:true},
+   {t:'Перечень исполненных аналогичных договоров за последние 3 года с контактами заказчиков', km:'', on:true},
+   {t:'Расшифровка дебиторской и кредиторской задолженности на последнюю отчётную дату', km:'Если по ГИР БО есть признаки финансовой неустойчивости', on:false},
+   {t:'Сведения о привлекаемых субподрядчиках с указанием предмета и доли работ', km:'', on:true},
+   {t:'Письменное подтверждение согласия на включение в договор налоговой оговорки', km:'', on:true},
   ],
 };
+const BLOCK_NAME = {A:'А', B:'Б', V:'В'};
 
 const LVL_NAME = {1:'Базовый', 2:'Стандартный', 3:'Углублённый'};
 const LVL_CLASS = {1:'b-base', 2:'b-std', 3:'b-deep'};
@@ -434,7 +460,7 @@ const LVL_VALID = {1:12, 2:12, 3:6};
 /* ====================== состояние ====================== */
 const blank = () => ({
   id:'', num:'', date:today(),
-  org:(ORGS[0] ? ORGS[0].id : 0), cp:'', inn:'', ogrn:'', subj:'podryad', sum:'', vat:true,
+  org:(ORGS[0] ? ORGS[0].id : 0), orgText:'', cp:'', inn:'', ogrn:'', subj:'', sum:'', vat:true,
   pay:'fact', avans:'', fin:'own',
   age:'>3', hist:'new', initiator:'', reason:'new',
   intragroup:false, affil:false, foreign:false, noexp:false,
@@ -442,9 +468,16 @@ const blank = () => ({
   lvlManual:0, lvlWhy:'',
   cl:{}, crit:{}, flags:[], mitig:{}, terms:{}, concl:'', decision:'',
   monitor:'',
+  hasContracts:'', contracts:[],            /* действующие договоры с контрагентом */
+  req:{sel:{}, edit:{}, extra:[], due:'', to:'', sign:''},   /* запрос документов */
+  auto:null,                                /* результат автопроверки: суды, ФССП, ЕФРСБ */
+  fromInit:null,                            /* кем и когда заполнен шаг «Сделка» */
 });
 let ORGS = load(LS.orgs) || ORGS_DEFAULT.map(o=>({...o}));
-let S = load(LS.draft) || blank();
+let EXCL = load(LS.excl) || [];            /* перечень контрагентов-исключений, ведёт КМ */
+let ROLE = (function(){ try{ return localStorage.getItem(LS.role)==='init' ? 'init' : 'km'; }catch(e){ return 'km'; } })();
+function hydrate(d){ const b = blank(); const x = Object.assign(b, d||{}); x.req = Object.assign(blank().req, (d&&d.req)||{}); x.contracts = Array.isArray(x.contracts)?x.contracts:[]; return x; }
+let S = hydrate(load(LS.draft));
 if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
 let REG = load(LS.reg) || [];
 let step = 1;
@@ -459,7 +492,28 @@ function money(n){ n = Number(n)||0; return n.toLocaleString('ru-RU'); }
 function rus(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}.${m}.${y}`; }
 const ORG_STUB = {id:0, name:'— организация не выбрана —', inn:'', role:'', porog:0, base:0, std:0, prikaz:''};
 function org(){ return ORGS.find(o=>o.id==S.org) || ORGS[0] || ORG_STUB; }
-function subj(){ return SUBJECTS.find(x=>x.v===S.subj) || SUBJECTS[0]; }
+const SUBJ_STUB = {v:'', t:'— предмет не выбран —', lvl:1, sk:false};
+function subj(){ return SUBJECTS.find(x=>x.v===S.subj) || SUBJ_STUB; }
+function orgName(){ const o = org(); return o.id ? o.name : (S.orgText || o.name); }
+function digits(v){ return String(v||'').replace(/\D/g,''); }
+function exclMatch(){ const i = digits(S.inn); return i ? EXCL.find(x=>digits(x.inn)===i) : null; }
+const EXCL_NAME = {
+  gov:'Органы власти, местного самоуправления, государственные и муниципальные учреждения и предприятия',
+  mono:'Ресурсоснабжающие организации, естественные монополии, операторы связи, кредитные организации',
+  intragroup:'Организация Группы — внутригрупповая сделка',
+};
+/* JSON <-> base64url для ссылок «инициатору» и «комплаенс-менеджеру». Данные едут во фрагменте
+   адреса (#…), который браузер на сервер не отправляет. */
+function pack(obj){
+  const b = new TextEncoder().encode(JSON.stringify(obj)); let bin=''; b.forEach(c=>bin+=String.fromCharCode(c));
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function unpack(str){
+  const bin = atob(str.replace(/-/g,'+').replace(/_/g,'/')); const b = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) b[i]=bin.charCodeAt(i);
+  return JSON.parse(new TextDecoder().decode(b));
+}
+function baseUrl(){ return location.href.split('#')[0]; }
 function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('on'),1900); }
 function addMonths(iso,m){ const d=new Date(iso); d.setMonth(d.getMonth()+m); return d.toISOString().slice(0,10); }
 function copy(text){
@@ -485,19 +539,27 @@ function download(name, text, mime){
 /* ====================== расчёт по Регламенту ====================== */
 function calc(){
   const o = org(), sj = subj();
-  const sum = Number(S.sum)||0;
+  const own = Number(S.sum)||0;
+  /* п. 4.4 — сумма считается по совокупности взаимосвязанных сделок; действующие договоры,
+     отмеченные как взаимосвязанные, прибавляются к сумме новой сделки */
+  const contracts = S.hasContracts==='yes' ? (S.contracts||[]) : [];
+  const linked = contracts.filter(c=>c.linked).reduce((a,c)=>a+(Number(c.sum)||0),0);
+  const sum = own + linked;
   const avans = Number(S.avans)||0;
-  const r = {org:o, subj:sj, sum, avans};
+  const r = {org:o, subj:sj, sum, own, linked, contracts, avans};
+  r.contractsTotal = contracts.reduce((a,c)=>a+(Number(c.sum)||0),0);
 
   /* --- нужна ли проверка (пп. 4.5–4.7) --- */
   r.p46 = [];
   if(sj.sk) r.p46.push('Подрядные, строительно-монтажные, проектные и изыскательские работы, функции техзаказчика — проверка независимо от суммы (п. 4.6)');
   (S.p46||[]).forEach(k=>r.p46.push(k));
 
-  r.excl = S.excl || '';
-  r.skip = false; r.skipWhy = '';
+  r.exclListed = (!S.excl && S.excl!=='none') ? exclMatch() : null;
+  r.excl = (S.excl && S.excl!=='none') ? S.excl : (r.exclListed ? r.exclListed.kind : '');
+  r.skip = false; r.skipWhy = ''; r.exclSkip = false;
+  if(r.excl && r.p46.length) r.condSkip = 'Исключение выбрано, но к сделке оно не применяется: есть основание проверки независимо от суммы (п. 4.6). Проверка проводится.';
   if(r.excl && !r.p46.length){
-    r.skip = true;
+    r.skip = true; r.exclSkip = true;
     r.skipWhy = r.excl === 'intragroup'
       ? 'Внутригрупповая сделка (пп. 4 п. 4.7). Проверка не проводится; комплаенс-менеджер с привлечением финансового департамента подтверждает соответствие цены принципу «вытянутой руки» и оформляет Заключение в сокращённой форме.'
       : 'Сделка отнесена к исключениям п. 4.7. Основание фиксируется инициатором в листе согласования со ссылкой на подпункт п. 4.7 и приказ организации об установлении порогов.';
@@ -518,7 +580,7 @@ function calc(){
   const parts = [];
   let bySum = 1;
   if(sum > o.std) bySum = 3; else if(sum > o.base) bySum = 2; else bySum = 1;
-  parts.push({k:'Сумма сделки', v:bySum, note:`${money(sum)} ₽ при границах ${money(o.base)} / ${money(o.std)} ₽`});
+  parts.push({k:'Сумма сделки', v:bySum, note:`${money(sum)} ₽${linked?` (${money(own)} + ${money(linked)} по взаимосвязанным действующим договорам)`:''} при границах ${money(o.base)} / ${money(o.std)} ₽`});
   parts.push({k:'Предмет договора', v:sj.lvl, note:sj.t});
   const byHist = S.hist==='>2' ? 1 : (S.hist==='0.5-2' ? 2 : 3);
   parts.push({k:'История сотрудничества', v:byHist, note:{'>2':'Более 2 лет без замечаний','0.5-2':'От 6 месяцев до 2 лет','new':'Новый контрагент либо замечания по исполнению'}[S.hist]});
@@ -591,7 +653,7 @@ function calc(){
   else if(abs.length||over.length) need.push({d:'Юридический департамент', why:'выявлен стоп-фактор'});
   const finFlag = r.scope.some(n=>{ const c=S.cl[n]; const it=CHECKLIST.find(x=>x.n===n); return it && it.fin && c && c.q && c.q!=='ok'; });
   if(r.lvl===3) need.push({d:'Финансовый департамент', why:'углублённый уровень риска'});
-  else if(S.intragroup || S.excl==='intragroup') need.push({d:'Финансовый департамент', why:'внутригрупповая сделка'});
+  else if(S.intragroup || r.excl==='intragroup') need.push({d:'Финансовый департамент', why:'внутригрупповая сделка'});
   else if(finFlag) need.push({d:'Финансовый департамент', why:'красные флаги налогового или финансового характера'});
   if(r.lvl===3 && (sj.sk || sj.teh)) need.push({d:'Технический заказчик', why:'подряд, проектирование или поставка оборудования при углублённом уровне'});
   r.need = need;
@@ -648,44 +710,187 @@ function calc(){
 }
 
 /* ====================== рендер: шаги ====================== */
-const STEPS = ['Сделка','Чек-лист','Стоп-факторы','Митигация','Заключение'];
+const STEPS = ['Сделка','Запрос документов','Чек-лист','Стоп-факторы','Митигация','Заключение'];
+const INIT_STEPS = 2;   /* инициатору доступны «Сделка» и «Запрос документов» */
 function renderSteps(){
   const r = calc();
   document.getElementById('steps').innerHTML = STEPS.map((t,i)=>{
     const n=i+1;
+    if(ROLE==='init' && n>INIT_STEPS) return '';
     let done=false;
-    if(n===1) done = !!(S.cp && S.sum);
-    if(n===2) done = r.done === r.scope.length && r.scope.length>0;
-    if(n===3) done = step>3;
+    if(n===1) done = !!(S.cp && S.subj && (S.sum || r.exclSkip));
+    if(n===2) done = step>2;
+    if(n===3) done = r.done === r.scope.length && r.scope.length>0;
     if(n===4) done = step>4;
+    if(n===5) done = step>5;
     return `<button class="step ${done?'done':''}" data-step="${n}" aria-current="${step===n}"><span class="num">${done?'✓':n}</span>${t}</button>`;
   }).join('');
 }
 
-/* ====================== шаг 1 ====================== */
+/* ====================== шаг 1 — заполняет инициатор ====================== */
+const P46 = [
+  'Продление договора либо допсоглашение об увеличении цены более чем на 20 % или существенном изменении предмета',
+  'Истёк срок действия ранее выданного Заключения (п. 9.4)',
+  'Субподрядчик или соисполнитель контрагента, привлечение которого согласуется организацией Группы',
+  'Поступила информация о рисках контрагента (п. 10.3) — внеочередная проверка',
+  'Требование уполномоченного лица, управляющего партнёра либо мотивированное решение комплаенс-менеджера',
+];
+
+/* чего не хватает, чтобы передать сделку комплаенс-менеджеру */
+function dealMissing(){
+  const r = calc(), m = [];
+  if(!org().id && !S.orgText.trim()) m.push('организация Группы');
+  if(!S.initiator.trim()) m.push('инициатор');
+  if(!S.cp.trim()) m.push('наименование контрагента');
+  if(![10,12].includes(digits(S.inn).length)) m.push('ИНН (10 или 12 цифр)');
+  if(!S.subj) m.push('предмет договора');
+  if(!r.exclSkip){
+    if(!r.own) m.push('сумма договора');
+    if(!S.hasContracts) m.push('ответ о действующих договорах');
+    if(S.hasContracts==='yes' && !r.contracts.length) m.push('хотя бы один действующий договор');
+  }
+  return m;
+}
+
+/* запись для листа согласования, когда проверка не проводится (п. 4.8) */
+function skipSheetText(){
+  const r = calc(), o = r.org;
+  const who = `${S.cp||'контрагент'}${S.inn?` (ИНН ${S.inn})`:''}`;
+  let why;
+  if(r.exclSkip){
+    why = r.excl==='intragroup'
+      ? 'контрагент входит в Группу, сделка внутригрупповая (пп. 4 п. 4.7 Регламента)'
+      : `${EXCL_NAME[r.excl].charAt(0).toLowerCase()+EXCL_NAME[r.excl].slice(1)} (подпункт ___ п. 4.7 Регламента)`;
+  } else {
+    why = `сумма сделки ${money(r.sum)} ₽ не превышает порог проверки ${money(o.porog)} ₽, оплата — ${S.pay==='fact'?'по факту':'предоплата со стороны контрагента'} (пп. 1 п. 4.7 Регламента)`;
+  }
+  return `Комплаенс-проверка контрагента ${who} не проводится: ${why}. `
+       + `Пороги установлены приказом ${o.prikaz||'____________'} по ${orgName()}. `
+       + `Инициатор: ${S.initiator||'____________'}, ${rus(today())}.`;
+}
+
+function renderS1Out(){
+  const el = document.getElementById('s1-out'); if(!el) return;
+  const r = calc(), o = r.org;
+  const sel = (v,cur)=> v==cur ? ' selected' : '';
+  if(r.skip){
+    el.innerHTML = `<div class="card">
+      <div class="hd"><h2>Проверка не проводится</h2><span class="ref">пп. 4.7–4.8</span></div>
+      <div class="verdict v-off"><b>Комплаенс-проверка не требуется</b>${esc(r.skipWhy)}</div>
+      <h3>Запись для листа согласования</h3>
+      <div class="letter">${esc(skipSheetText())}</div>
+      <div class="btnrow"><button class="btn" data-act="copy-skip">Скопировать запись</button></div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `
+  <div class="card">
+    <div class="hd"><h2>Порог и уровень проверки</h2><span class="ref">пп. 4.5–4.7, 5.2–5.3, Приложения № 1 и № 2</span></div>
+    ${o.id?`<table class="t"><tbody>
+      <tr><th style="width:46%">Порог проверки для ${esc(o.name)}</th><td><b>${money(o.porog)} ₽</b>${o.prikaz?` · приказ ${esc(o.prikaz)}`:' <span class="muted small">· реквизиты приказа не внесены</span>'}</td></tr>
+      <tr><th>Верхняя граница базового уровня</th><td>${money(o.base)} ₽</td></tr>
+      <tr><th>Верхняя граница стандартного уровня</th><td>${money(o.std)} ₽</td></tr>
+      ${r.linked?`<tr><th>Сумма для сравнения с порогом (п. 4.4)</th><td><b>${money(r.sum)} ₽</b> = ${money(r.own)} ₽ по новой сделке + ${money(r.linked)} ₽ по взаимосвязанным действующим договорам</td></tr>`:''}
+    </tbody></table>`
+    :`<div class="verdict v-cond"><b>Справочник порогов не загружен</b>Уровень ниже посчитан без учёта суммы сделки и потому предварительный. Попросите у комплаенс-менеджера ссылку для инициаторов: в ней организации Группы и их пороги. Сделку можно передать и так — комплаенс-менеджер пересчитает уровень у себя.</div>`}
+    ${r.condSkip?`<div class="verdict v-cond" style="margin-top:12px">${esc(r.condSkip)}</div>`:''}
+    <div class="sep"></div>
+    <div class="scroll"><table class="t">
+      <thead><tr><th>Критерий</th><th>Значение</th><th style="width:130px">Уровень</th></tr></thead>
+      <tbody>${r.parts.map(p=>`<tr><td>${esc(p.k)}</td><td class="muted">${esc(p.note)}</td><td><span class="badge ${LVL_CLASS[p.v]}">${LVL_NAME[p.v]}</span></td></tr>`).join('')}</tbody>
+    </table></div>
+    ${r.forced.length?`<div class="hint" style="margin-top:8px">${r.forced.map(esc).join('<br>')}</div>`:''}
+    ${r.p53.length?`<div class="verdict v-neg" style="margin-top:12px"><b>Углублённый уровень независимо от суммы (п. 5.3)</b><ul class="tight" style="margin:0">${r.p53.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`:''}
+    ${ROLE==='km'?`<div class="sep"></div>
+    <div class="grid2">
+      <label class="f">Мотивированное повышение уровня комплаенс-менеджером <span class="hint">Понижение ниже расчётного не допускается (п. 5.4)</span>
+        <select data-f="lvlManual">
+          <option value="0"${sel(0,S.lvlManual)}>Не повышать — ${LVL_NAME[r.lvlAuto]}</option>
+          ${r.lvlAuto<2?`<option value="2"${sel(2,S.lvlManual)}>Повысить до стандартного</option>`:''}
+          ${r.lvlAuto<3?`<option value="3"${sel(3,S.lvlManual)}>Повысить до углублённого</option>`:''}
+        </select>
+      </label>
+      <label class="f">Обоснование повышения
+        <input type="text" data-f="lvlWhy" value="${esc(S.lvlWhy)}" ${Number(S.lvlManual)?'':'disabled'}>
+      </label>
+    </div>`:''}
+  </div>`;
+}
+
+function renderHandoff(){
+  const el = document.getElementById('s1-hand'); if(!el) return;
+  if(ROLE!=='init'){ el.innerHTML=''; return; }
+  const miss = dealMissing();
+  el.innerHTML = `<div class="card" style="border-color:var(--accent)">
+    <div class="hd"><h2>Передать комплаенс-менеджеру</h2></div>
+    ${miss.length
+      ? `<div class="verdict v-cond"><b>Осталось заполнить</b>${esc(miss.join(', '))}.</div>`
+      : `<p style="margin-top:0">Сделка заполнена. Отправьте комплаенс-менеджеру ссылку или файл: он откроет их у себя и продолжит проверку с того места, где вы остановились. Перенабирать ничего не придётся.</p>`}
+    <div class="btnrow" style="margin-top:0">
+      <button class="btn primary" data-act="deal-link" ${miss.length?'disabled':''}>Скопировать ссылку на сделку</button>
+      <button class="btn" data-act="deal-file" ${miss.length?'disabled':''}>Скачать файл сделки</button>
+    </div>
+    <div class="hint">Данные сделки зашиты в саму ссылку и на сервер не попадают. Пересылайте её так же, как переслали бы договор: по рабочей почте или в корпоративном мессенджере.</div>
+  </div>`;
+}
+
 function renderS1(){
   const r = calc();
-  const o = r.org;
   const sel = (v,cur)=> v==cur ? ' selected' : '';
-  const P46 = [
-    'Продление договора либо допсоглашение об увеличении цены более чем на 20 % или существенном изменении предмета',
-    'Истёк срок действия ранее выданного Заключения (п. 9.4)',
-    'Субподрядчик или соисполнитель контрагента, привлечение которого согласуется организацией Группы',
-    'Поступила информация о рисках контрагента (п. 10.3) — внеочередная проверка',
-    'Требование уполномоченного лица, управляющего партнёра либо мотивированное решение комплаенс-менеджера',
-  ];
   const noOrgs = !ORGS.length;
+  const listed = exclMatch();
+  const exclCur = S.excl || (listed ? listed.kind : 'none');
+  const prev = ROLE==='km' && digits(S.inn) ? REG.filter(x=>digits(x.inn)===digits(S.inn)) : [];
+
+  const banner = ROLE==='init'
+    ? `<div class="verdict v-off"><b>Этот шаг заполняет инициатор сделки</b>Сначала отметьте, не относится ли контрагент к исключениям: если относится, остальное заполнять не нужно. Когда закончите, передайте сделку комплаенс-менеджеру — кнопка внизу страницы.</div>`
+    : (S.fromInit ? `<div class="verdict v-ok"><b>Сделку заполнил инициатор</b>${esc(S.fromInit.who||'—')}, ${rus(S.fromInit.at)}. Проверьте сведения и переходите к запросу документов и чек-листу.</div>`
+                  : `<div class="verdict v-off"><b>Сделку заполняет инициатор</b>Отправьте инициатору ссылку с вкладки «Настройки» — заполненная сделка вернётся к вам ссылкой или файлом. Можно заполнить и самому.
+                     <div class="btnrow" style="margin-top:8px"><button class="btn" data-act="deal-load">Загрузить файл сделки</button></div></div>`);
+
+  const contractsCard = `
+  <div class="card">
+    <div class="hd"><h2>Действующие договоры с контрагентом</h2><span class="ref">п. 4.4 — взаимосвязанные сделки</span></div>
+    <label class="f" style="max-width:420px">Есть ли у организаций Группы действующие договоры с этим контрагентом
+      <select data-f="hasContracts">
+        <option value=""${sel('',S.hasContracts)}>— выберите —</option>
+        <option value="no"${sel('no',S.hasContracts)}>Нет</option>
+        <option value="yes"${sel('yes',S.hasContracts)}>Да</option>
+      </select>
+    </label>
+    ${S.hasContracts==='yes'?`
+    <div class="scroll" style="margin-top:12px"><table class="t">
+      <thead><tr><th style="min-width:190px">Компания Группы</th><th style="min-width:200px">Договор: номер, дата, предмет</th><th style="width:150px">Сумма, ₽</th><th style="width:150px">Взаимосвязан с новой сделкой</th><th></th></tr></thead>
+      <tbody>${(S.contracts||[]).map((c,i)=>`<tr>
+        <td>${noOrgs
+          ? `<input type="text" data-ct="${i}" data-k="org" value="${esc(c.org||'')}" placeholder="ООО «…»">`
+          : `<select data-ct="${i}" data-k="org"><option value="">— выберите —</option>${ORGS.map(x=>`<option value="${esc(x.name)}"${x.name===c.org?' selected':''}>${esc(x.name)}</option>`).join('')}</select>`}</td>
+        <td><input type="text" data-ct="${i}" data-k="what" value="${esc(c.what||'')}" placeholder="№ 15 от 01.03.2026, поставка бетона"></td>
+        <td><input type="number" data-ct="${i}" data-k="sum" value="${esc(c.sum||'')}" min="0" step="1000"></td>
+        <td><label class="chk" style="padding:0"><input type="checkbox" data-ct="${i}" data-k="linked" ${c.linked?'checked':''}> учитывать в сумме</label></td>
+        <td><button class="btn ghost danger" style="padding:2px 8px;font-size:12px" data-ctdel="${i}">×</button></td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">Договоры не внесены.</td></tr>'}</tbody>
+    </table></div>
+    <div class="btnrow"><button class="btn" data-act="ct-add">Добавить договор</button></div>
+    <div class="hint" id="ct-total"></div>
+    <div class="hint">Отметьте «учитывать в сумме», если договор взаимосвязан с новой сделкой: тот же предмет, тот же объект, одна закупка, разбитая на части. Суммы таких договоров прибавляются к сумме сделки при сравнении с порогом и при расчёте уровня.</div>`:''}
+  </div>`;
+
   document.getElementById('s1').innerHTML = `
-  ${noOrgs?`<div class="card" style="border-color:var(--warn)">
+  ${banner}
+  ${noOrgs && ROLE==='km'?`<div class="card" style="border-color:var(--warn)">
     <div class="hd"><h2>Сначала внесите организации и пороги</h2><span class="ref">Приложение № 2, п. 4.2</span></div>
     <p style="margin-top:0">Пороговые значения устанавливаются приказом руководителя каждой организации Группы, поэтому в коде приложения они не хранятся. Внесите их один раз — они останутся в этом браузере.</p>
-    <div class="btnrow" style="margin:0"><button class="btn primary" data-view="orgs">Перейти к порогам</button></div>
+    <div class="btnrow" style="margin:0"><button class="btn primary" data-view="orgs">Перейти к настройкам</button></div>
   </div>`:''}
+
   <div class="card">
-    <div class="hd"><h2>Сделка и контрагент</h2><span class="ref">разделы 4–5 Регламента</span></div>
+    <div class="hd"><h2>Кто с кем заключает договор</h2></div>
     <div class="grid2">
       <label class="f">Организация Группы
-        <select data-f="org">${noOrgs?'<option value="0">— справочник пуст —</option>':ORGS.map(x=>`<option value="${x.id}"${sel(x.id,S.org)}>${esc(x.name)}</option>`).join('')}</select>
+        ${noOrgs
+          ? `<input type="text" data-f="orgText" value="${esc(S.orgText)}" placeholder="ООО «…»">`
+          : `<select data-f="org">${ORGS.map(x=>`<option value="${x.id}"${sel(x.id,S.org)}>${esc(x.name)}</option>`).join('')}</select>`}
       </label>
       <label class="f">Инициатор (Ф.И.О., должность)
         <input type="text" data-f="initiator" value="${esc(S.initiator)}" placeholder="Иванов И.И., начальник ОМТС">
@@ -693,11 +898,37 @@ function renderS1(){
       <label class="f">Контрагент — наименование
         <input type="text" data-f="cp" value="${esc(S.cp)}" placeholder="ООО «Ромашка»">
       </label>
-      <label class="f">ИНН
-        <input type="text" data-f="inn" value="${esc(S.inn)}" placeholder="2540000000">
+      <label class="f">ИНН контрагента
+        <input type="text" data-f="inn" value="${esc(S.inn)}" placeholder="2540000000" inputmode="numeric">
       </label>
-      <label class="f">ОГРН
-        <input type="text" data-f="ogrn" value="${esc(S.ogrn)}">
+      <label class="f">ОГРН <span class="hint">необязательно</span>
+        <input type="text" data-f="ogrn" value="${esc(S.ogrn)}" inputmode="numeric">
+      </label>
+      <label class="f">Предмет договора
+        <select data-f="subj"><option value="">— выберите —</option>${SUBJECTS.map(x=>`<option value="${x.v}"${sel(x.v,S.subj)}>${esc(x.t)}</option>`).join('')}</select>
+      </label>
+    </div>
+    ${!noOrgs && S.orgText && ROLE==='km' && S.fromInit && S.orgText!==org().name ? `<div class="hint" style="color:var(--warn)">Инициатор указал организацию «${esc(S.orgText)}» — проверьте, что в списке выбрана она.</div>`:''}
+    ${prev.length?`<div class="verdict v-cond" style="margin:12px 0 0"><b>Контрагент уже есть в Реестре</b>${prev.map(x=>`Заключение ${esc(x.num||'б/н')} от ${rus(x.date)}: ${esc(x.verdict)}; действует до ${rus(x.validUntil)}${x.validUntil<today()?' — срок истёк':''}`).join('<br>')}</div>`:''}
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Исключения — кого не проверяем</h2><span class="ref">пп. 4.7–4.8</span></div>
+    ${listed?`<div class="verdict v-ok"><b>Контрагент есть в перечне исключений</b>${esc(listed.name||S.cp)} — ${esc(EXCL_NAME[listed.kind]||'')}. Перечень ведёт комплаенс-менеджер.</div>`:''}
+    <label class="opt"><input type="radio" name="excl" data-f="excl" value="none" ${exclCur==='none'?'checked':''}><span><b>Исключение не применяется</b> — обычный контрагент, проверка идёт по общим правилам</span></label>
+    ${['gov','mono','intragroup'].map(k=>`<label class="opt"><input type="radio" name="excl" data-f="excl" value="${k}" ${exclCur===k?'checked':''}><span>${esc(EXCL_NAME[k])}${k==='mono'?' <span class="muted">(по перечню комплаенс-менеджера)</span>':''}</span></label>`).join('')}
+    <div class="sep"></div>
+    <h3>Когда исключение не работает — проверка независимо от суммы (п. 4.6)</h3>
+    ${r.subj.sk?`<div class="hint" style="color:var(--warn);margin-bottom:4px">Предмет договора относится к строительному блоку: проверка обязательна независимо от суммы и исключений, уровень не ниже стандартного.</div>`:''}
+    ${P46.map(t=>`<label class="chk"><input type="checkbox" data-p46="${esc(t)}" ${(S.p46||[]).includes(t)?'checked':''}> ${esc(t)}</label>`).join('')}
+  </div>
+
+  ${r.exclSkip ? '' : `
+  <div class="card">
+    <div class="hd"><h2>Условия сделки</h2><span class="ref">разделы 4–5 Регламента</span></div>
+    <div class="grid2">
+      <label class="f">Сумма договора с НДС, ₽
+        <input type="number" data-f="sum" value="${esc(S.sum)}" min="0" step="1000" placeholder="0">
       </label>
       <label class="f">Основание проверки
         <select data-f="reason">
@@ -705,15 +936,6 @@ function renderS1(){
           <option value="prolong"${sel('prolong',S.reason)}>Продление, допсоглашение</option>
           <option value="extra"${sel('extra',S.reason)}>Внеочередная проверка</option>
         </select>
-      </label>
-    </div>
-    <div class="sep"></div>
-    <div class="grid2">
-      <label class="f">Предмет договора
-        <select data-f="subj">${SUBJECTS.map(x=>`<option value="${x.v}"${sel(x.v,S.subj)}>${esc(x.t)}</option>`).join('')}</select>
-      </label>
-      <label class="f">Сумма договора с НДС, ₽ <span class="hint">п. 4.4: по совокупности взаимосвязанных сделок за квартал</span>
-        <input type="number" data-f="sum" value="${esc(S.sum)}" min="0" step="1000" placeholder="0">
       </label>
       <label class="f">Условия оплаты
         <select data-f="pay">
@@ -746,82 +968,288 @@ function renderS1(){
           <option value="new"${sel('new',S.hist)}>Новый контрагент либо есть замечания</option>
         </select>
       </label>
-      <label class="f">Дата проверки
+      ${ROLE==='km'?`<label class="f">Дата проверки
         <input type="date" data-f="date" value="${esc(S.date)}">
-      </label>
+      </label>`:''}
     </div>
     <div class="sep"></div>
-    <h3>Обстоятельства п. 5.3 — углублённый уровень независимо от суммы</h3>
+    <h3>Что ещё известно о контрагенте</h3>
     <label class="chk"><input type="checkbox" data-b="noexp" ${S.noexp?'checked':''}> Нет подтверждённого опыта по предмету договора</label>
     <label class="chk"><input type="checkbox" data-b="affil" ${S.affil?'checked':''}> Контрагент взаимозависим или аффилирован с организацией Группы, её участниками или руководителями</label>
     <label class="chk"><input type="checkbox" data-b="foreign" ${S.foreign?'checked':''}> Иностранный элемент, трансграничные платежи</label>
+    <div class="hint">Любая из отметок переводит проверку на углублённый уровень независимо от суммы (п. 5.3).</div>
   </div>
+  ${contractsCard}`}
 
-  <div class="card">
-    <div class="hd"><h2>Порог проверки и исключения</h2><span class="ref">пп. 4.5–4.7, Приложение № 2</span></div>
-    <table class="t"><tbody>
-      <tr><th style="width:46%">Порог проверки для ${esc(o.name)}</th><td><b>${money(o.porog)} ₽</b>${o.prikaz?` · приказ ${esc(o.prikaz)}`:' <span class="muted small">· реквизиты приказа не внесены</span>'}</td></tr>
-      <tr><th>Верхняя граница базового уровня</th><td>${money(o.base)} ₽</td></tr>
-      <tr><th>Верхняя граница стандартного уровня</th><td>${money(o.std)} ₽</td></tr>
-    </tbody></table>
-    <div class="sep"></div>
-    <h3>Проверка независимо от суммы (п. 4.6)</h3>
-    ${r.subj.sk?`<div class="hint" style="color:var(--warn)">Предмет договора относится к строительному блоку — проверка обязательна независимо от суммы, уровень не ниже стандартного.</div>`:''}
-    ${P46.map((t,i)=>`<label class="chk"><input type="checkbox" data-p46="${esc(t)}" ${(S.p46||[]).includes(t)?'checked':''}> ${esc(t)}</label>`).join('')}
-    <div class="sep"></div>
-    <h3>Исключения — проверка не проводится (п. 4.7)</h3>
-    <label class="f" style="max-width:520px">
-      <select data-f="excl">
-        <option value="">Исключение не применяется</option>
-        <option value="gov"${sel('gov',S.excl)}>Органы власти, местного самоуправления, государственные и муниципальные учреждения и предприятия</option>
-        <option value="mono"${sel('mono',S.excl)}>Ресурсоснабжающие организации, естественные монополии, операторы связи, кредитные организации (по перечню КМ)</option>
-        <option value="intragroup"${sel('intragroup',S.excl)}>Организация Группы — внутригрупповая сделка</option>
-      </select>
-    </label>
-    <div class="hint">Отнесение к исключению фиксируется инициатором в листе согласования со ссылкой на подпункт п. 4.7 и приказ об установлении порогов (п. 4.8).</div>
-    ${r.condSkip?`<div class="verdict v-cond" style="margin-top:12px">${esc(r.condSkip)}</div>`:''}
-  </div>
-
-  <div class="card">
-    <div class="hd"><h2>Расчёт уровня риска</h2><span class="ref">Приложение № 1, пп. 5.2–5.3</span></div>
-    <div class="scroll"><table class="t">
-      <thead><tr><th>Критерий</th><th>Значение</th><th style="width:130px">Уровень</th></tr></thead>
-      <tbody>${r.parts.map(p=>`<tr><td>${esc(p.k)}</td><td class="muted">${esc(p.note)}</td><td><span class="badge ${LVL_CLASS[p.v]}">${LVL_NAME[p.v]}</span></td></tr>`).join('')}</tbody>
-    </table></div>
-    ${r.forced.length?`<div class="hint" style="margin-top:8px">${r.forced.map(esc).join('<br>')}</div>`:''}
-    ${r.p53.length?`<div class="verdict v-neg" style="margin-top:12px"><b>Углублённый уровень независимо от суммы (п. 5.3)</b><ul class="tight" style="margin:0">${r.p53.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`:''}
-    <div class="sep"></div>
-    <div class="grid2">
-      <label class="f">Мотивированное повышение уровня комплаенс-менеджером <span class="hint">Понижение ниже расчётного не допускается (п. 5.4)</span>
-        <select data-f="lvlManual">
-          <option value="0"${sel(0,S.lvlManual)}>Не повышать — ${LVL_NAME[r.lvlAuto]}</option>
-          ${r.lvlAuto<2?`<option value="2"${sel(2,S.lvlManual)}>Повысить до стандартного</option>`:''}
-          ${r.lvlAuto<3?`<option value="3"${sel(3,S.lvlManual)}>Повысить до углублённого</option>`:''}
-        </select>
-      </label>
-      <label class="f">Обоснование повышения
-        <input type="text" data-f="lvlWhy" value="${esc(S.lvlWhy)}" ${Number(S.lvlManual)?'':'disabled'}>
-      </label>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="hd"><h2>Что запросить у контрагента</h2><span class="ref">Приложения № 3 и № 4, пп. 7.4–7.6</span></div>
-    <p class="small muted" style="margin-top:0">Минимизация (п. 7.4): всё, что есть в ЕГРЮЛ, «Прозрачном бизнесе», ГИР БО, реестрах СРО и лицензий, картотеках судебных дел и исполнительных производств, комплаенс-менеджер получает сам. Истребование таких документов у контрагента не допускается.</p>
-    <p><b>Анкета:</b> ${esc(r.anketa)}</p>
-    ${r.blocks.map(b=>`
-      <h3>Блок ${b==='A'?'А':b==='B'?'Б':'В'}</h3>
-      <ul class="tight">${DOCS[b].map(d=>`<li>${esc(d)}</li>`).join('')}</ul>`).join('')}
-    <div class="btnrow">
-      <button class="btn" data-act="copy-request">Скопировать запрос контрагенту</button>
-    </div>
-  </div>
-
-  <div class="btnrow"><button class="btn primary" data-go="2">Перейти к чек-листу →</button></div>`;
+  <div id="s1-out"></div>
+  <div id="s1-hand"></div>
+  <div class="btnrow">${r.skip?'':`<button class="btn ${ROLE==='init'?'':'primary'}" data-go="2">К запросу документов →</button>`}</div>`;
+  renderS1Out(); renderHandoff(); renderCtTotal();
+}
+function renderCtTotal(){
+  const el = document.getElementById('ct-total'); if(!el) return;
+  const r = calc();
+  el.textContent = r.contracts.length ? `Всего по действующим договорам: ${money(r.contractsTotal)} ₽, из них взаимосвязано с новой сделкой — ${money(r.linked)} ₽.` : '';
 }
 
-/* ====================== шаг 2 ====================== */
-function renderS2(){
+/* ====================== шаг 2 — запрос документов ====================== */
+function reqItems(){
+  const r = calc(), out = [];
+  r.blocks.forEach(b=>DOCS[b].forEach((d,i)=>{
+    const key = b+i;
+    let on = d.on;
+    if(d.deep && r.lvl===3) on = true;
+    if(d.sk && !r.subj.sk) on = false;
+    if(S.req.sel[key] !== undefined) on = !!S.req.sel[key];
+    const t = S.req.edit[key] !== undefined ? S.req.edit[key] : d.t;
+    out.push({key, block:b, on, t, km:d.km, anketa:!!d.anketa, edited:S.req.edit[key]!==undefined});
+  }));
+  return out;
+}
+function reqLines(){
+  const list = reqItems().filter(x=>x.on && x.t.trim()).map(x=>x.t.trim());
+  (S.req.extra||[]).forEach(x=>{ if((x.t||'').trim()) list.push(x.t.trim()); });
+  return list.map(t=>t.replace(/[.;]+$/,''));
+}
+function reqParts(){
+  const r = calc();
+  const subject = r.subj.v ? r.subj.t.charAt(0).toLowerCase()+r.subj.t.slice(1) : '';
+  const due = S.req.due ? `до ${rus(S.req.due)}` : '';
+  const to  = (S.req.to||'').trim() ? `на адрес ${S.req.to.trim()}` : '';
+  const where = [due,to].filter(Boolean).join(' ') || 'в ответ на это письмо';
+  return {
+    head:[`Кому: ${S.cp||'____________'}${S.inn?`, ИНН ${S.inn}`:''}`, `От: ${orgName()}`, `Дата: ${rus(today())}`],
+    intro:`Готовим к заключению договор${subject?` (${subject})`:''}. Чтобы согласовать его, просим направить следующие документы и сведения.`,
+    list:reqLines(),
+    tail:[
+      `Документы просим направить ${where}.`,
+      'Документы должны быть не старше 3 месяцев на дату представления, если в перечне не указано иное.',
+      'Выписку из ЕГРЮЛ, бухгалтерскую отчётность и другие сведения, которые есть в открытых источниках, присылать не нужно.',
+    ],
+    sign:(S.req.sign||'').trim() || S.initiator || '____________',
+  };
+}
+function reqText(){
+  const p = reqParts();
+  return ['Запрос документов','',...p.head,'','Добрый день!','',p.intro,'',...p.list.map((t,i)=>`${i+1}. ${t}${i===p.list.length-1?'.':';'}`),'',...p.tail,'','С уважением,',p.sign].join('\n');
+}
+function reqDocHtml(){
+  const p = reqParts(), P = t=>`<p style="margin:0 0 8pt">${esc(t)}</p>`;
+  return `<html><head><meta charset="utf-8"><title>Запрос документов</title></head><body style="font-family:'Times New Roman',serif;font-size:12pt;line-height:1.35">
+<p style="text-align:center;font-weight:bold;margin:0 0 12pt">Запрос документов</p>
+${p.head.map(t=>`<p style="margin:0">${esc(t)}</p>`).join('')}
+<p style="margin:12pt 0 8pt">Добрый день!</p>
+${P(p.intro)}
+<ol style="margin:0 0 8pt">${p.list.map((t,i)=>`<li>${esc(t)}${i===p.list.length-1?'.':';'}</li>`).join('')}</ol>
+${p.tail.map(P).join('')}
+<p style="margin:12pt 0 0">С уважением,<br>${esc(p.sign)}</p>
+</body></html>`;
+}
+function fit(ta){ ta.style.height='auto'; ta.style.height=(ta.scrollHeight+2)+'px'; }
+function renderReqPreview(){
+  const el = document.getElementById('rq-preview'); if(el) el.textContent = reqText();
+  const c = document.getElementById('rq-count'); if(c) c.textContent = `в письме позиций: ${reqLines().length}`;
+}
+function renderReq(){
+  const r = calc();
+  if(r.skip){
+    document.getElementById('s2').innerHTML = `<div class="card"><div class="verdict v-off" style="margin:0"><b>Запрос не нужен</b>Проверка по этой сделке не проводится, документы у контрагента не запрашиваются.</div></div>
+    <div class="btnrow"><button class="btn ghost" data-go="1">← Сделка</button></div>`;
+    return;
+  }
+  const items = reqItems();
+  const blocks = r.blocks.map(b=>{
+    const rows = items.filter(x=>x.block===b).map(x=>`<div class="rq ${x.on?'':'off'}">
+      <input type="checkbox" data-rqs="${x.key}" ${x.on?'checked':''} aria-label="Включить в запрос">
+      <div class="body">
+        <textarea data-rqe="${x.key}" rows="1">${esc(x.t)}</textarea>
+        ${x.anketa?`<div class="hint" style="color:var(--warn)">Приложите к письму бланк анкеты: ${esc(r.anketa.toLowerCase())}.</div>`:''}
+        ${x.km?`<div class="hint">${esc(x.km)}. В письмо эта подсказка не попадает.</div>`:''}
+        ${x.edited?`<button class="btn ghost" style="padding:1px 7px;font-size:11.5px;margin-top:4px" data-rqreset="${x.key}">вернуть исходную формулировку</button>`:''}
+      </div>
+    </div>`).join('');
+    return `<h3 style="margin-top:14px">Блок ${BLOCK_NAME[b]}</h3>${rows}`;
+  }).join('');
+  const extra = (S.req.extra||[]).map((x,i)=>`<div class="rq">
+      <input type="checkbox" checked disabled>
+      <div class="body"><textarea data-rqx="${i}" rows="1" placeholder="Что ещё нужно от контрагента">${esc(x.t||'')}</textarea></div>
+      <button class="btn ghost danger" style="padding:2px 8px;font-size:12px;margin-top:4px" data-rqxdel="${i}">×</button>
+    </div>`).join('');
+
+  document.getElementById('s2').innerHTML = `
+  <div class="card">
+    <div class="hd"><h2>Что запросить у контрагента</h2><span class="ref">уровень ${LVL_NAME[r.lvl].toLowerCase()} · <span id="rq-count"></span></span></div>
+    <p class="small muted" style="margin-top:0">Перечень собран под уровень проверки. Снимите лишнее, поправьте формулировки, допишите своё — ниже сразу видно письмо, которое уйдёт контрагенту. Ссылок на Регламент, названий блоков и служебных пометок в нём нет. Всё, что есть в ЕГРЮЛ, «Прозрачном бизнесе», ГИР БО, реестрах СРО и картотеках судов и приставов, у контрагента не запрашивается (п. 7.4).</p>
+    ${blocks}
+    ${extra?`<h3 style="margin-top:14px">Добавлено вручную</h3>${extra}`:''}
+    <div class="btnrow"><button class="btn" data-act="rq-add">Добавить документ</button><button class="btn ghost" data-act="rq-reset">Вернуть перечень по умолчанию</button></div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Письмо контрагенту</h2><span class="ref">чистовик</span></div>
+    <div class="grid2" style="margin-bottom:12px">
+      <label class="f">Срок представления<input type="date" data-rqf="due" value="${esc(S.req.due)}"></label>
+      <label class="f">Куда направить документы<input type="text" data-rqf="to" value="${esc(S.req.to)}" placeholder="ivanov@company.ru"></label>
+      <label class="f">Подпись<input type="text" data-rqf="sign" value="${esc(S.req.sign)}" placeholder="${esc(S.initiator||'Ф.И.О., должность')}"></label>
+    </div>
+    <div class="letter" id="rq-preview"></div>
+    <div class="btnrow">
+      <button class="btn primary" data-act="rq-doc">Скачать .doc</button>
+      <button class="btn" data-act="rq-copy">Скопировать текст</button>
+      <button class="btn" data-act="rq-mail">Открыть письмо в почте</button>
+    </div>
+    <div class="hint">«Открыть письмо» создаёт письмо с темой и копирует текст в буфер — останется вставить его и приложить бланк анкеты.</div>
+  </div>
+  <div class="btnrow">
+    <button class="btn ghost" data-go="1">← Сделка</button>
+    ${ROLE==='km'?`<button class="btn primary" data-go="3">Перейти к чек-листу →</button>`:''}
+  </div>`;
+  renderReqPreview();
+  document.querySelectorAll('#s2 .rq textarea').forEach(fit);
+}
+
+/* ====================== автопроверка: суды, приставы, банкротство ======================
+   Картотека арбитражных дел, банк данных ФССП и ЕФРСБ не отдают данные странице из браузера:
+   у них нет открытого API, а формы закрыты капчей. Поэтому сведения берутся через API Checko
+   (api.checko.ru) — он собирает те же три источника и разрешает запросы из браузера.
+   Ключ хранится только в localStorage комплаенс-менеджера. */
+const AUTO_MARK = 'Автопроверка';
+let autoBusy = false, autoErr = '';
+function apiKey(){ try{ return localStorage.getItem(LS.api)||''; }catch(e){ return ''; } }
+async function checko(method, params){
+  const u = new URL('https://api.checko.ru/v2/'+method);
+  u.searchParams.set('key', apiKey());
+  Object.keys(params).forEach(k=>u.searchParams.set(k, params[k]));
+  const res = await fetch(u, {referrerPolicy:'no-referrer'});
+  let j = null; try{ j = await res.json(); }catch(e){}
+  if(!j || !j.meta || j.meta.status!=='ok') throw new Error((j && j.meta && j.meta.message) || `сервис ответил кодом ${res.status}`);
+  return j;
+}
+function num(v){ return Number(v)||0; }
+function names(a){ return (Array.isArray(a)?a:[]).map(x=>x && x['Наим']).filter(Boolean).join(', '); }
+function safeUrl(u){ return /^https:\/\//.test(String(u||'')) ? u : ''; }
+function stamp(iso){ const d=new Date(iso); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+async function autoCheck(){
+  const inn = digits(S.inn);
+  if(![10,12].includes(inn.length)){ toast('Укажите ИНН контрагента: 10 или 12 цифр'); return; }
+  if(!apiKey()){ toast('Сначала внесите ключ API на вкладке «Настройки»'); return; }
+  autoBusy = true; autoErr = ''; render();
+  try{
+    const q = {inn, sort:'-date'};
+    const def = await checko('legal-cases', Object.assign({role:'defendant'}, q));
+    const act = await checko('legal-cases', Object.assign({role:'defendant', active:'true', limit:'1'}, q));
+    const pl  = await checko('legal-cases', Object.assign({role:'plaintiff', limit:'1'}, q));
+    const enf = await checko('enforcements', q);
+    const bk  = await checko('bankruptcy-messages', q);
+    const who = def.company || def.entrepreneur || {};
+    const enfRows = (enf.data && enf.data['Записи']) || [];
+    S.auto = {
+      at:new Date().toISOString(), inn,
+      who:{name:who['НаимСокр']||who['НаимПолн']||who['ФИО']||'', ogrn:who['ОГРН']||who['ОГРНИП']||'', status:who['Статус']||'', reg:who['ДатаРег']||''},
+      def:{n:num(def.data['ЗапВсего']), sum:num(def.data['ОбщСуммИск']),
+           rows:((def.data['Записи'])||[]).slice(0,10).map(x=>({num:x['Номер'], date:x['Дата'], court:x['Суд'], sum:num(x['СуммИск']), other:names(x['Ист']), url:safeUrl(x['СтрКАД'])}))},
+      act:{n:num(act.data['ЗапВсего']), sum:num(act.data['ОбщСуммИск'])},
+      pl:{n:num(pl.data['ЗапВсего']), sum:num(pl.data['ОбщСуммИск'])},
+      enf:{n:enfRows.length, more:num(enf.data && enf.data['СтрВсего'])>1,
+           debt:enfRows.reduce((a,x)=>a+num(x['СумДолг']),0), rest:enfRows.reduce((a,x)=>a+num(x['ОстЗадолж']),0),
+           rows:enfRows.slice(0,10).map(x=>({num:x['ИспПрНомер'], date:x['ИспПрДата'], what:x['ПредмИсп'], debt:num(x['СумДолг']), rest:num(x['ОстЗадолж'])}))},
+      bk:{n:num(bk.data['ЗапВсего']),
+          rows:((bk.data['Записи'])||[]).slice(0,10).map(x=>({date:x['Дата'], type:x['ТипНаим']||x['Тип'], caseNum:x['НомерДела'], court:x['Суд'], url:safeUrl(x['URL'])}))},
+    };
+    /* попутно — то, что сервис вернул о самом контрагенте */
+    if(!S.cp && S.auto.who.name) S.cp = S.auto.who.name;
+    if(!S.ogrn && S.auto.who.ogrn) S.ogrn = S.auto.who.ogrn;
+    if(S.auto.who.reg){
+      const yrs = (Date.now() - new Date(S.auto.who.reg).getTime()) / (365.25*864e5);
+      if(isFinite(yrs)) S.age = yrs < 1 ? '<1' : (yrs < 3 ? '1-3' : '>3');
+    }
+    autoNotes();
+    toast('Суды, приставы и банкротство проверены');
+  }catch(e){
+    autoErr = (e && e.message==='Failed to fetch') ? 'не удалось связаться с api.checko.ru — проверьте интернет и не блокирует ли запрос корпоративная сеть' : String((e && e.message) || e);
+  }
+  autoBusy = false; render();
+}
+
+/* результат раскладывается по позициям 9–11 чек-листа. Квалификацию при находках даёт
+   комплаенс-менеджер; «соответствует» ставится само только там, где не найдено ничего. */
+function autoNotes(){
+  const a = S.auto; if(!a) return;
+  const head = `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — Checko`;
+  const put = (n, text, clean)=>{
+    const c = S.cl[n] || {};
+    if(!(c.note||'').trim() || c.note.startsWith(AUTO_MARK)) c.note = text;
+    if(!c.q && clean) c.q = 'ok';
+    S.cl[n] = c;
+  };
+  const last = a.def.rows.slice(0,5).map(x=>`${x.num} от ${rus(x.date)}${x.sum?`, ${money(x.sum)} ₽`:''}${x.other?`, истец ${x.other}`:''}`).join('; ');
+  put(9, `${head} (данные картотеки арбитражных дел). Ответчик: дел — ${a.def.n}, сумма требований — ${money(a.def.sum)} ₽; из них не завершено — ${a.act.n} на ${money(a.act.sum)} ₽. Истец: дел — ${a.pl.n} на ${money(a.pl.sum)} ₽.${last?` Последние дела, где контрагент ответчик: ${last}.`:''} Суды общей юрисдикции сервис не охватывает.`, a.def.n===0);
+  const enfLast = a.enf.rows.slice(0,5).map(x=>`${x.num} от ${rus(x.date)}: ${x.what||'предмет не указан'}, остаток ${money(x.rest)} ₽`).join('; ');
+  put(10, `${head} (данные банка исполнительных производств ФССП). Производств — ${a.enf.more?'более ':''}${a.enf.n}, сумма долга — ${money(a.enf.debt)} ₽, остаток задолженности — ${money(a.enf.rest)} ₽.${enfLast?` Последние: ${enfLast}.`:''}`, a.enf.n===0);
+  const bkLast = a.bk.rows.slice(0,5).map(x=>`${rus(x.date)} — ${x.type||'сообщение'}${x.caseNum?`, дело ${x.caseNum}`:''}`).join('; ');
+  put(11, `${head} (данные ЕФРСБ). Сообщений о банкротстве — ${a.bk.n}.${bkLast?` Последние: ${bkLast}.`:''}`, a.bk.n===0);
+}
+
+function autoReportHtml(){
+  const a = S.auto; if(!a) return '';
+  const tbl = (head, rows)=> rows.length ? `<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:10pt;width:100%"><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr>${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>` : '<p>Записей нет.</p>';
+  return `<html><head><meta charset="utf-8"><title>Справка автопроверки</title></head><body style="font-family:'Times New Roman',serif;font-size:12pt">
+<p style="text-align:center;font-weight:bold">Справка о проверке контрагента по судам, исполнительным производствам и банкротству</p>
+<p>Контрагент: ${esc(S.cp||a.who.name||'—')}, ИНН ${esc(a.inn)}${a.who.ogrn?`, ОГРН ${esc(a.who.ogrn)}`:''}${a.who.status?`. Статус: ${esc(a.who.status)}`:''}.<br>
+Дата и время запроса: ${esc(stamp(a.at))}. Источник: API Checko (api.checko.ru).</p>
+<p><b>Арбитражные дела.</b> Ответчик: ${a.def.n} на ${money(a.def.sum)} ₽, из них не завершено ${a.act.n} на ${money(a.act.sum)} ₽. Истец: ${a.pl.n} на ${money(a.pl.sum)} ₽.</p>
+${tbl(['Дело','Дата','Суд','Сумма, ₽','Истец'], a.def.rows.map(x=>[x.num, rus(x.date), x.court, money(x.sum), x.other]))}
+<p><b>Исполнительные производства.</b> ${a.enf.more?'Более ':''}${a.enf.n}, сумма долга ${money(a.enf.debt)} ₽, остаток ${money(a.enf.rest)} ₽.</p>
+${tbl(['Производство','Дата','Предмет','Долг, ₽','Остаток, ₽'], a.enf.rows.map(x=>[x.num, rus(x.date), x.what, money(x.debt), money(x.rest)]))}
+<p><b>ЕФРСБ.</b> Сообщений: ${a.bk.n}.</p>
+${tbl(['Дата','Сообщение','Дело','Суд'], a.bk.rows.map(x=>[rus(x.date), x.type, x.caseNum, x.court]))}
+<p style="font-size:10pt">В таблицах — не более десяти последних записей по каждому источнику. Справка не заменяет выгрузку из первоисточника там, где Регламент требует её приобщить к досье (п. 7.3).</p>
+</body></html>`;
+}
+
+function autoCard(){
+  const a = S.auto, inn = digits(S.inn);
+  const stale = a && a.inn !== inn;
+  const link = (u,t)=> u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)} ↗</a>` : esc(t);
+  let body;
+  if(!apiKey()){
+    body = `<p style="margin:0 0 8px">Чтобы приложение само собирало арбитражные дела, исполнительные производства и сообщения о банкротстве, внесите ключ API на вкладке «Настройки». Без ключа эти три позиции проверяются вручную по ссылкам:</p>
+    <div class="btnrow" style="margin:0">
+      <a class="btn" href="https://kad.arbitr.ru/" target="_blank" rel="noopener noreferrer">Картотека арбитражных дел ↗</a>
+      <a class="btn" href="https://fssp.gov.ru/iss/ip" target="_blank" rel="noopener noreferrer">ФССП ↗</a>
+      <a class="btn" href="https://bankrot.fedresurs.ru/bankrupts?searchString=${encodeURIComponent(inn)}" target="_blank" rel="noopener noreferrer">ЕФРСБ по ИНН ↗</a>
+      <button class="btn ghost" data-view="orgs">Внести ключ</button>
+    </div>`;
+  } else if(autoBusy){
+    body = `<p class="muted" style="margin:0">Запрашиваю суды, приставов и ЕФРСБ…</p>`;
+  } else {
+    body = `${autoErr?`<div class="verdict v-neg"><b>Проверка не прошла</b>${esc(autoErr)}</div>`:''}
+    ${a && !stale ? `
+    <div class="scroll"><table class="t"><tbody>
+      <tr><th style="width:34%">Арбитражные дела, ответчик</th><td><b>${a.def.n}</b> на ${money(a.def.sum)} ₽; не завершено — <b>${a.act.n}</b> на ${money(a.act.sum)} ₽</td></tr>
+      <tr><th>Арбитражные дела, истец</th><td>${a.pl.n} на ${money(a.pl.sum)} ₽</td></tr>
+      <tr><th>Исполнительные производства</th><td><b>${a.enf.more?'более ':''}${a.enf.n}</b>, долг ${money(a.enf.debt)} ₽, остаток ${money(a.enf.rest)} ₽</td></tr>
+      <tr><th>Сообщения в ЕФРСБ</th><td><b>${a.bk.n}</b></td></tr>
+    </tbody></table></div>
+    ${a.def.rows.length?`<h3 style="margin-top:12px">Последние дела, где контрагент ответчик</h3><ul class="tight">${a.def.rows.map(x=>`<li>${link(x.url,x.num)} от ${rus(x.date)}${x.sum?`, ${money(x.sum)} ₽`:''}${x.other?` — истец ${esc(x.other)}`:''}</li>`).join('')}</ul>`:''}
+    ${a.enf.rows.length?`<h3 style="margin-top:12px">Исполнительные производства</h3><ul class="tight">${a.enf.rows.map(x=>`<li>${esc(x.num)} от ${rus(x.date)}: ${esc(x.what||'предмет не указан')}, остаток ${money(x.rest)} ₽</li>`).join('')}</ul>`:''}
+    ${a.bk.rows.length?`<h3 style="margin-top:12px">Сообщения ЕФРСБ</h3><ul class="tight">${a.bk.rows.map(x=>`<li>${rus(x.date)} — ${link(x.url, x.type||'сообщение')}${x.caseNum?`, дело ${esc(x.caseNum)}`:''}</li>`).join('')}</ul>`:''}
+    <div class="hint">Проверено ${esc(stamp(a.at))}. Итоги внесены в позиции 9–11 чек-листа; где ничего не найдено, стоит «соответствует», остальное квалифицируете вы.</div>`
+    : `<p class="muted" style="margin:0 0 4px">${stale?'ИНН изменился после прошлой проверки — запустите её заново.':'По ИНН контрагента приложение соберёт арбитражные дела, исполнительные производства и сообщения ЕФРСБ и разложит их по позициям 9–11.'}</p>`}
+    <div class="btnrow">
+      <button class="btn primary" data-act="auto-run">${a && !stale?'Проверить заново':'Проверить по ИНН'}</button>
+      ${a && !stale?`<button class="btn" data-act="auto-doc">Скачать справку для досье</button>`:''}
+    </div>`;
+  }
+  return `<div class="card">
+    <div class="hd"><h2>Суды, приставы, банкротство</h2><span class="ref">позиции 9–11 · автоматически</span></div>
+    ${body}
+  </div>`;
+}
+
+/* ====================== шаг 3 — чек-лист ====================== */
+function renderS3(){
   const r = calc();
   const items = r.scope.map(n=>{
     const it = CHECKLIST.find(x=>x.n===n);
@@ -848,7 +1276,8 @@ function renderS2(){
     </div>`;
   }).join('');
 
-  document.getElementById('s2').innerHTML = `
+  document.getElementById('s3').innerHTML = `
+  ${autoCard()}
   <div class="card">
     <div class="hd"><h2>Чек-лист комплаенс-проверки</h2><span class="ref">Приложение № 5 · уровень ${LVL_NAME[r.lvl].toLowerCase()} · позиции ${r.scope.length} из 28</span></div>
     <p class="small muted" style="margin-top:0">Все сведения из открытых источников фиксируются выгрузкой в PDF или снимком экрана с указанием источника, даты и времени и приобщаются к комплаенс-досье. Ссылка на источник без сохранённой копии надлежащей фиксацией не признаётся (п. 7.3).</p>
@@ -859,13 +1288,13 @@ function renderS2(){
   </div>
   <div class="card">${items}</div>
   <div class="btnrow">
-    <button class="btn ghost" data-go="1">← Сделка</button>
-    <button class="btn primary" data-go="3">К стоп-факторам →</button>
+    <button class="btn ghost" data-go="2">← Запрос документов</button>
+    <button class="btn primary" data-go="4">К стоп-факторам →</button>
   </div>`;
 }
 
-/* ====================== шаг 3 ====================== */
-function renderS3(){
+/* ====================== шаг 4 — стоп-факторы ====================== */
+function renderS4(){
   const r = calc();
   const label = {flag:'красный флаг', over:'преодолимый стоп-фактор', abs:'абсолютный стоп-фактор'};
   const crit = CRIT.map(c=>{
@@ -886,7 +1315,7 @@ function renderS3(){
     </div>`;
   }).join('');
 
-  document.getElementById('s3').innerHTML = `
+  document.getElementById('s4').innerHTML = `
   <div class="card">
     <div class="hd"><h2>Критические факторы</h2><span class="ref">Приложение № 6, раздел 1</span></div>
     <p class="small muted" style="margin-top:0">При отсутствии прямого правового запрета приоритет отдаётся квалификации как красного флага или преодолимого стоп-фактора с митигацией.</p>
@@ -898,15 +1327,15 @@ function renderS3(){
     ${FLAGS.map(f=>`<label class="chk"><input type="checkbox" data-flag="${f.n}" ${(S.flags||[]).includes(f.n)?'checked':''}> <span><b class="pill">${f.n}</b> ${esc(f.t)}</span></label>`).join('')}
   </div>
   <div class="btnrow">
-    <button class="btn ghost" data-go="2">← Чек-лист</button>
-    <button class="btn primary" data-go="4">К митигации →</button>
+    <button class="btn ghost" data-go="3">← Чек-лист</button>
+    <button class="btn primary" data-go="5">К митигации →</button>
   </div>`;
 }
 
-/* ====================== шаг 4 ====================== */
-function renderS4(){
+/* ====================== шаг 5 — митигация ====================== */
+function renderS5(){
   const r = calc();
-  document.getElementById('s4').innerHTML = `
+  document.getElementById('s5').innerHTML = `
   <div class="card">
     <div class="hd"><h2>Меры снижения риска</h2><span class="ref">п. 9.3</span></div>
     ${r.mit.length ? `<div class="scroll"><table class="t">
@@ -930,12 +1359,12 @@ function renderS4(){
     : `<p class="muted">Обязательное привлечение профильных подразделений не требуется. Комплаенс-менеджер вправе запросить мнение по своему решению.</p>`}
   </div>
   <div class="btnrow">
-    <button class="btn ghost" data-go="3">← Стоп-факторы</button>
-    <button class="btn primary" data-go="5">К Заключению →</button>
+    <button class="btn ghost" data-go="4">← Стоп-факторы</button>
+    <button class="btn primary" data-go="6">К Заключению →</button>
   </div>`;
 }
 
-/* ====================== шаг 5 ====================== */
+/* ====================== шаг 6 — заключение ====================== */
 function concText(){
   const r = calc(), o = r.org;
   const L = [];
@@ -944,10 +1373,17 @@ function concText(){
   L.push('(Приложение № 7 к Регламенту о порядке проведения комплаенс-проверки контрагентов)');
   nl();
   L.push(`Номер и дата Заключения: ${S.num||'б/н'} от ${rus(S.date)}`);
-  L.push(`Организация Группы: ${o.name}, ИНН ${o.inn}`);
+  L.push(`Организация Группы: ${orgName()}${o.inn?`, ИНН ${o.inn}`:''}`);
   L.push(`Порог проверки и границы уровней: ${money(o.porog)} / ${money(o.base)} / ${money(o.std)} ₽${o.prikaz?` (приказ ${o.prikaz})`:''}`);
   L.push(`Контрагент: ${S.cp||'—'}, ИНН ${S.inn||'—'}${S.ogrn?`, ОГРН ${S.ogrn}`:''}`);
-  L.push(`Предмет и сумма договора: ${r.subj.t}; ${money(r.sum)} ₽ с НДС`);
+  L.push(`Предмет и сумма договора: ${r.subj.t}; ${money(r.own)} ₽ с НДС`);
+  if(S.hasContracts==='yes' && r.contracts.length){
+    L.push(`Действующие договоры с контрагентом (по сведениям инициатора), всего на ${money(r.contractsTotal)} ₽:`);
+    r.contracts.forEach((c,i)=>L.push(`  ${i+1}) ${c.org||'организация не указана'} — ${c.what||'реквизиты не указаны'}; ${money(c.sum)} ₽${c.linked?'; взаимосвязан с новой сделкой':''}`));
+    if(r.linked) L.push(`Сумма для определения порога и уровня (п. 4.4): ${money(r.sum)} ₽, включая взаимосвязанные договоры на ${money(r.linked)} ₽`);
+  } else if(S.hasContracts==='no'){
+    L.push('Действующие договоры с контрагентом: по сведениям инициатора отсутствуют');
+  }
   L.push(`Условия оплаты: ${S.pay==='fact'?'оплата по факту':S.pay==='cp-prepay'?'предоплата со стороны контрагента':`аванс ${r.avans} %`}; источник финансирования — ${ {own:'собственные средства',project:'проектное финансирование',dolevoe:'средства участников долевого строительства'}[S.fin] }`);
   L.push(`Инициатор: ${S.initiator||'—'}`);
   L.push(`Основание проверки: ${ {new:'новый договор',prolong:'продление, дополнительное соглашение',extra:'внеочередная проверка'}[S.reason] }`);
@@ -961,6 +1397,10 @@ function concText(){
     const q = {ok:'соответствует',flag:'красный флаг',over:'преодолимый стоп-фактор',abs:'абсолютный стоп-фактор'}[c.q] || 'не заполнено';
     L.push(`  ${n}. ${it.t} — ${q}.${(c.note||'').trim()?` ${c.note.trim()}`:''}`);
   });
+  if(S.auto && !r.scope.includes(9)){
+    const a = S.auto;
+    L.push(`  Дополнительно, вне объёма уровня (автопроверка ${stamp(a.at)}, источник — Checko): арбитражные дела, ответчик — ${a.def.n} на ${money(a.def.sum)} ₽, не завершено — ${a.act.n}; исполнительные производства — ${a.enf.more?'более ':''}${a.enf.n}, остаток ${money(a.enf.rest)} ₽; сообщения ЕФРСБ — ${a.bk.n}.`);
+  }
   nl();
   L.push('2. ПРОФИЛЬНЫЕ МНЕНИЯ ПОДРАЗДЕЛЕНИЙ');
   if(r.need.length) r.need.forEach(n=>L.push(`  ${n.d} — запрошено обязательно (${n.why}). Запрошено ____________, получено ____________. Существо позиции: ____________`));
@@ -998,10 +1438,10 @@ function concText(){
   return L.join('\n');
 }
 
-function renderS5(){
+function renderS6(){
   const r = calc();
   const vcls = {ok:'v-ok', cond:'v-cond', neg:'v-neg', skip:'v-off', draft:'v-off'}[r.verdict];
-  document.getElementById('s5').innerHTML = `
+  document.getElementById('s6').innerHTML = `
   <div class="card noprint">
     <div class="hd"><h2>Оформление Заключения</h2><span class="ref">Приложение № 7</span></div>
     <div class="grid2">
@@ -1024,7 +1464,7 @@ function renderS5(){
     <div class="verdict ${vcls}"><b>${esc(r.verdictText)}</b>${esc(r.verdictWhy||r.skipWhy||'')}</div>
     <div class="doc"><pre style="white-space:pre-wrap;font-family:var(--serif);font-size:13.5px;margin:0">${esc(concText())}</pre></div>
   </div>
-  <div class="btnrow noprint"><button class="btn ghost" data-go="4">← Митигация</button></div>`;
+  <div class="btnrow noprint"><button class="btn ghost" data-go="5">← Митигация</button></div>`;
 }
 
 /* ====================== боковая сводка ====================== */
@@ -1036,18 +1476,20 @@ function renderSide(){
     <div class="verdict ${vcls}"><b>${esc(r.verdictText)}</b>${esc(r.skip? r.skipWhy : (r.verdictWhy||''))}</div>
     <div class="sum-line"><span>Уровень риска</span><span><span class="badge ${LVL_CLASS[r.lvl]}">${LVL_NAME[r.lvl]}</span></span></div>
     <div class="sum-line"><span>Срок Стадии 0</span><span>до ${r.days} р.д.</span></div>
-    <div class="sum-line"><span>Позиции чек-листа</span><span>${r.done} / ${r.scope.length}</span></div>
+    ${ROLE==='km'?`<div class="sum-line"><span>Позиции чек-листа</span><span>${r.done} / ${r.scope.length}</span></div>`:''}
+    ${r.linked?`<div class="sum-line"><span>Сумма с учётом п. 4.4</span><span>${money(r.sum)} ₽</span></div>`:''}
     <div class="sum-line"><span>Анкета</span><span>${esc(r.anketa)}</span></div>
     <div class="sum-line"><span>Документы</span><span>Блок${r.blocks.length>1?'и':''} ${r.blocks.map(b=>b==='A'?'А':b==='B'?'Б':'В').join(', ')}</span></div>
     <div class="sum-line"><span>Налоговая оговорка</span><span>${esc(r.nalog)}</span></div>
     <div class="sum-line"><span>Выезд к контрагенту</span><span style="font-weight:500;font-size:12px">${esc(r.lvl===3?'Обязателен для нового подрядчика':r.vyezd)}</span></div>
     <div class="sum-line"><span>Срок действия</span><span>${r.valid} мес. · до ${rus(r.validUntil)}</span></div>
-    <div class="sum-line"><span>Абс. / преод. / флаги</span><span>${r.abs.length} / ${r.over.length} / ${r.flag.length}</span></div>
+    ${ROLE==='km'?`<div class="sum-line"><span>Абс. / преод. / флаги</span><span>${r.abs.length} / ${r.over.length} / ${r.flag.length}</span></div>`:''}
   </div>
   <div class="card" style="padding:12px 14px">
     <div class="btnrow" style="margin:0">
-      <button class="btn ghost" data-act="new">Новая проверка</button>
-      <button class="btn ghost" data-act="export-draft">Выгрузить JSON</button>
+      <button class="btn ghost" data-act="new">${ROLE==='init'?'Новая сделка':'Новая проверка'}</button>
+      ${ROLE==='km'?`<button class="btn ghost" data-act="deal-load">Загрузить сделку</button>
+      <button class="btn ghost" data-act="export-draft">Выгрузить JSON</button>`:''}
     </div>
   </div>`;
 }
@@ -1116,6 +1558,42 @@ function renderOrgs(){
       <button class="btn" data-act="org-import">Загрузить JSON</button>
       <button class="btn ghost" data-act="org-export">Выгрузить JSON</button>
     </div>
+    <div class="hint">Выгрузка включает и перечень исключений ниже.</div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Перечень исключений</h2><span class="ref">п. 4.7 — кого не проверяем</span></div>
+    <p class="small muted" style="margin-top:0">Контрагенты, по которым проверка не проводится: ресурсоснабжающие организации, монополии, банки, органы власти, компании Группы. Когда инициатор вводит ИНН из перечня, исключение подставляется само.</p>
+    ${EXCL.length?`<div class="scroll"><table class="t">
+      <thead><tr><th>№</th><th>ИНН</th><th>Наименование</th><th>Основание</th><th></th></tr></thead>
+      <tbody>${EXCL.map((x,i)=>`<tr>
+        <td>${i+1}</td>
+        <td><input type="text" data-ex="${i}" data-k="inn" value="${esc(x.inn)}" placeholder="ИНН" style="width:130px" inputmode="numeric"></td>
+        <td><input type="text" data-ex="${i}" data-k="name" value="${esc(x.name)}" placeholder="ПАО «…»" style="min-width:200px"></td>
+        <td><select data-ex="${i}" data-k="kind">${Object.keys(EXCL_NAME).map(k=>`<option value="${k}"${x.kind===k?' selected':''}>${esc(EXCL_NAME[k])}</option>`).join('')}</select></td>
+        <td><button class="btn ghost danger" style="padding:2px 8px;font-size:12px" data-exdel="${i}">×</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`:`<p class="muted">Перечень пуст.</p>`}
+    <div class="btnrow"><button class="btn" data-act="ex-add">Добавить контрагента</button></div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Ссылка для инициаторов</h2></div>
+    <p class="small muted" style="margin-top:0">По этой ссылке приложение открывается в режиме инициатора: с вашими организациями, порогами и перечнем исключений, но без чек-листа, Реестра и ключа API. Инициатор заполняет сделку и возвращает её вам ссылкой или файлом. После правки порогов или перечня разошлите ссылку заново.</p>
+    <div class="btnrow" style="margin-top:0"><button class="btn primary" data-act="init-link" ${ORGS.length?'':'disabled'}>Скопировать ссылку для инициаторов</button></div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>Автопроверка: суды, приставы, банкротство</h2><span class="ref">API Checko</span></div>
+    <p class="small muted" style="margin-top:0">Картотека арбитражных дел, банк данных ФССП и ЕФРСБ не отдают сведения странице в браузере: открытого API у них нет, формы закрыты капчей. Приложение берёт эти данные через сервис Checko. Ключ выдаётся в личном кабинете на checko.ru после регистрации; лимит запросов зависит от тарифа, одна проверка контрагента расходует пять запросов.</p>
+    <label class="f" style="max-width:460px">Ключ API
+      <input type="password" data-api="1" value="${esc(apiKey())}" placeholder="вставьте ключ из личного кабинета" autocomplete="off">
+    </label>
+    <div class="btnrow">
+      <a class="btn" href="https://checko.ru/integration/api" target="_blank" rel="noopener noreferrer">Получить ключ на checko.ru ↗</a>
+      <button class="btn ghost danger" data-act="api-clear">Удалить ключ</button>
+    </div>
+    <div class="hint">Ключ хранится только в этом браузере и не попадает ни в ссылки, ни в выгрузки. При проверке в Checko уходит ИНН контрагента и больше ничего.</div>
   </div>`;
 }
 
@@ -1125,21 +1603,30 @@ function renderHelp(){
   <div class="card" style="margin-top:18px">
     <div class="hd"><h2>Как это устроено</h2></div>
     <p>Приложение ведёт Стадию 0 договорной работы по Регламенту о порядке проведения комплаенс-проверки контрагентов ГК «С.АН ГРУПП»: считает уровень риска, показывает нужный объём чек-листа, квалифицирует стоп-факторы, подбирает меры митигации и собирает Заключение по форме Приложения № 7.</p>
+    <h3>Кто что делает</h3>
+    <ul class="tight">
+      <li><b>Инициатор</b> заполняет шаг «Сделка»: сначала отмечает исключения, затем условия сделки и действующие договоры с контрагентом. Готовую сделку передаёт комплаенс-менеджеру ссылкой или файлом. Запрос документов контрагенту может отправить и он.</li>
+      <li><b>Комплаенс-менеджер</b> открывает сделку, запускает автопроверку, проходит чек-лист, стоп-факторы, митигацию и оформляет Заключение. Он же ведёт пороги, перечень исключений и Реестр.</li>
+      <li>Режим переключается в шапке. Ссылка для инициаторов с вкладки «Настройки» сразу открывает приложение в режиме инициатора с вашими порогами и исключениями.</li>
+    </ul>
     <h3>Что считается автоматически</h3>
     <ul class="tight">
-      <li>Нужна ли проверка вообще — порог организации (Приложение № 2), случаи п. 4.6 и исключения п. 4.7.</li>
+      <li>Нужна ли проверка вообще — исключения п. 4.7 (в том числе по перечню комплаенс-менеджера), порог организации (Приложение № 2), случаи п. 4.6.</li>
+      <li>Сумма для сравнения с порогом: к сумме новой сделки прибавляются действующие договоры, которые инициатор отметил как взаимосвязанные (п. 4.4).</li>
       <li>Уровень риска — по пяти критериям Приложения № 1, берётся наибольший (п. 5.2), затем применяются основания п. 5.3.</li>
       <li>Объём чек-листа: базовый — позиции 1–7 и 19–21, стандартный — 1–14 и 19–24, углублённый — все 28.</li>
-      <li>Сроки Стадии 0 (1 / 2 / 5 рабочих дней), срок действия Заключения (12 / 12 / 6 месяцев), форма анкеты и блоки истребуемых документов.</li>
+      <li>Сроки Стадии 0 (1 / 2 / 5 рабочих дней), срок действия Заключения (12 / 12 / 6 месяцев), перечень документов для запроса.</li>
+      <li>Арбитражные дела, исполнительные производства и сообщения ЕФРСБ по ИНН контрагента — через API Checko, если на вкладке «Настройки» внесён ключ. Итог раскладывается по позициям 9–11 чек-листа.</li>
       <li>Обязательность привлечения профильных подразделений (п. 6.4) и налоговой оговорки (п. 12.5).</li>
       <li>Вывод по п. 7.9 и необходимость решения по п. 8.3, включая согласование управляющего партнёра.</li>
     </ul>
     <h3>Чего приложение не делает</h3>
     <ul class="tight">
-      <li>Не ходит в ЕГРЮЛ, «Прозрачный бизнес», ГИР БО и картотеки само — даёт ссылки на источники, а результат вносит комплаенс-менеджер. Выгрузки и снимки экрана приобщаются к досье отдельно (п. 7.3).</li>
+      <li>Не ходит само в ЕГРЮЛ, «Прозрачный бизнес», ГИР БО и остальные реестры, кроме трёх перечисленных выше, — даёт ссылки, а результат вносит комплаенс-менеджер. Выгрузки и снимки экрана приобщаются к досье отдельно (п. 7.3).</li>
+      <li>Не квалифицирует находки автопроверки. «Соответствует» ставится само только там, где не найдено ничего; дела, производства и сообщения оцениваете вы. Суды общей юрисдикции автопроверка не охватывает.</li>
       <li>Не заменяет мотивировку. Там, где Регламент требует фактических показателей и обоснования, поле обязательно к заполнению.</li>
-      <li>Не хранит данные на сервере: справочник порогов, реестр и черновик лежат в localStorage этого браузера и никуда не отправляются. Для единого по Группе реестра выгружайте JSON или CSV.</li>
-      <li>Не содержит пороговых значений: они устанавливаются приказами руководителей организаций и вносятся на вкладке «Пороги».</li>
+      <li>Не хранит данные на сервере: пороги, перечень исключений, реестр и черновик лежат в localStorage этого браузера. Сделка от инициатора едет внутри ссылки или файлом. Наружу уходит одно — ИНН контрагента в Checko при автопроверке.</li>
+      <li>Не содержит пороговых значений: они устанавливаются приказами руководителей организаций и вносятся на вкладке «Настройки».</li>
     </ul>
     <h3>Понижение уровня</h3>
     <p>Комплаенс-менеджер вправе мотивированно повысить уровень проверки по любой сделке. Понижение ниже уровня, определяемого Приложениями № 1 и № 2, не допускается (п. 5.4) — в приложении такой возможности нет.</p>
@@ -1148,18 +1635,22 @@ function renderHelp(){
 
 /* ====================== перерисовка ====================== */
 function render(){
+  if(ROLE==='init'){ if(view==='registry' || view==='orgs') view='check'; if(step>INIT_STEPS) step=1; }
+  document.querySelectorAll('#role button').forEach(b=>b.setAttribute('aria-pressed', b.dataset.role===ROLE));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('hidden', ROLE==='init' && (t.dataset.view==='registry' || t.dataset.view==='orgs')));
   ['check','registry','orgs','help'].forEach(v=>{
     document.getElementById('v-'+v).classList.toggle('hidden', v!==view);
   });
   document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected', t.dataset.view===view));
   if(view==='check'){
     renderSteps();
-    [1,2,3,4,5].forEach(n=>document.getElementById('s'+n).classList.toggle('hidden', n!==step));
+    [1,2,3,4,5,6].forEach(n=>document.getElementById('s'+n).classList.toggle('hidden', n!==step));
     if(step===1) renderS1();
-    if(step===2) renderS2();
+    if(step===2) renderReq();
     if(step===3) renderS3();
     if(step===4) renderS4();
     if(step===5) renderS5();
+    if(step===6) renderS6();
     renderSide();
   }
   if(view==='registry') renderRegistry();
@@ -1176,10 +1667,28 @@ document.addEventListener('input', e=>{
     S[k] = (t.type==='checkbox') ? t.checked : t.value;
     if(k==='pay' && t.value!=='avans') S.avans = '';
     if(k==='lvlManual') S.lvlManual = Number(t.value)||0;
-    if(['org','subj','pay','fin','age','hist','excl','lvlManual','reason'].includes(k)) render();
-    else { renderSide(); renderSteps(); save(LS.draft,S); }
+    if(['org','subj','pay','fin','age','hist','excl','lvlManual','reason','hasContracts'].includes(k)) render();
+    else {
+      renderSide(); renderSteps(); save(LS.draft,S);
+      if(!t.closest('#s1-out')) renderS1Out();
+      renderHandoff();
+    }
     return;
   }
+  if(t.dataset.ct !== undefined){
+    const c = S.contracts[Number(t.dataset.ct)]; if(!c) return;
+    c[t.dataset.k] = t.type==='checkbox' ? t.checked : t.value;
+    save(LS.draft,S); renderSide(); renderS1Out(); renderCtTotal(); renderHandoff(); return;
+  }
+  if(t.dataset.rqe !== undefined || t.dataset.rqx !== undefined) fit(t);
+  if(t.dataset.rqe !== undefined){ S.req.edit[t.dataset.rqe] = t.value; save(LS.draft,S); renderReqPreview(); return; }
+  if(t.dataset.rqx !== undefined){ const x = S.req.extra[Number(t.dataset.rqx)]; if(x){ x.t = t.value; save(LS.draft,S); renderReqPreview(); } return; }
+  if(t.dataset.rqf !== undefined){ S.req[t.dataset.rqf] = t.value; save(LS.draft,S); renderReqPreview(); return; }
+  if(t.dataset.ex !== undefined){
+    const x = EXCL[Number(t.dataset.ex)]; if(x){ x[t.dataset.k] = t.value; save(LS.excl,EXCL); }
+    return;
+  }
+  if(t.dataset.api !== undefined){ try{ localStorage.setItem(LS.api, t.value.trim()); }catch(e){} return; }
   if(t.dataset.note !== undefined){
     const n = t.dataset.note;
     S.cl[n] = Object.assign({}, S.cl[n], {note:t.value});
@@ -1215,11 +1724,18 @@ document.addEventListener('change', e=>{
     render(); return;
   }
   if(t.dataset.term !== undefined){ S.terms[t.dataset.term] = t.checked; render(); return; }
+  if(t.dataset.rqs !== undefined){ S.req.sel[t.dataset.rqs] = t.checked; render(); return; }
 });
 
 document.addEventListener('click', e=>{
-  const t = e.target.closest('[data-step],[data-go],[data-act],[data-view],[data-open],[data-del],[data-mon],[data-copyinn],[data-orgdel]');
+  const t = e.target.closest('[data-step],[data-go],[data-act],[data-view],[data-open],[data-del],[data-mon],[data-copyinn],[data-orgdel],[data-role],[data-ctdel],[data-rqreset],[data-rqxdel],[data-exdel]');
   if(!t) return;
+
+  if(t.dataset.role){ ROLE = t.dataset.role; try{ localStorage.setItem(LS.role, ROLE); }catch(err){} render(); return; }
+  if(t.dataset.ctdel !== undefined){ S.contracts.splice(Number(t.dataset.ctdel),1); render(); return; }
+  if(t.dataset.rqreset !== undefined){ delete S.req.edit[t.dataset.rqreset]; render(); return; }
+  if(t.dataset.rqxdel !== undefined){ S.req.extra.splice(Number(t.dataset.rqxdel),1); render(); return; }
+  if(t.dataset.exdel !== undefined){ EXCL.splice(Number(t.dataset.exdel),1); save(LS.excl,EXCL); render(); return; }
 
   if(t.dataset.view){ view = t.dataset.view; render(); return; }
   if(t.dataset.step){ step = Number(t.dataset.step); render(); window.scrollTo({top:0,behavior:'smooth'}); return; }
@@ -1228,7 +1744,7 @@ document.addEventListener('click', e=>{
 
   if(t.dataset.open !== undefined){
     const rec = REG[Number(t.dataset.open)];
-    if(rec && rec.snapshot){ S = JSON.parse(JSON.stringify(rec.snapshot)); view='check'; step=1; render(); toast('Проверка загружена'); }
+    if(rec && rec.snapshot){ S = hydrate(JSON.parse(JSON.stringify(rec.snapshot))); view='check'; step=1; render(); toast('Проверка загружена'); }
     return;
   }
   if(t.dataset.del !== undefined){
@@ -1246,7 +1762,36 @@ document.addEventListener('click', e=>{
   const a = t.dataset.act;
   const r = calc();
 
-  if(a==='new'){ S = blank(); step=1; render(); toast('Новая проверка'); return; }
+  if(a==='new'){ S = blank(); autoErr=''; step=1; render(); toast(ROLE==='init'?'Новая сделка':'Новая проверка'); return; }
+  if(a==='copy-skip'){ copy(skipSheetText()); return; }
+  if(a==='ct-add'){ S.contracts.push({org:'', what:'', sum:'', linked:false}); render(); return; }
+  if(a==='deal-link' || a==='deal-file'){
+    S.fromInit = {who:S.initiator, at:today()};
+    if(!org().id) S.orgText = S.orgText || ''; else S.orgText = org().name;
+    const d = JSON.parse(JSON.stringify(S));
+    save(LS.draft,S);
+    if(a==='deal-link') copy(baseUrl()+'#deal='+pack(d));
+    else download(`Сделка_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${today()}.json`, JSON.stringify(d,null,2), 'application/json');
+    return;
+  }
+  if(a==='deal-load'){
+    const inp = document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+    inp.onchange = ()=>{
+      const f = inp.files && inp.files[0]; if(!f) return;
+      f.text().then(txt=>{ try{ takeDeal(JSON.parse(txt.replace(/^\uFEFF/,''))); }catch(err){ toast('Не удалось разобрать файл сделки'); } });
+    };
+    inp.click(); return;
+  }
+  if(a==='init-link'){ copy(baseUrl()+'#init='+pack({orgs:ORGS, excl:EXCL})); return; }
+  if(a==='ex-add'){ EXCL.push({inn:'', name:'', kind:'mono'}); save(LS.excl,EXCL); render(); return; }
+  if(a==='api-clear'){ try{ localStorage.removeItem(LS.api); }catch(err){} render(); toast('Ключ удалён'); return; }
+  if(a==='auto-run'){ autoCheck(); return; }
+  if(a==='auto-doc'){ download(`Автопроверка_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${today()}.doc`, autoReportHtml(), 'application/msword'); return; }
+  if(a==='rq-add'){ S.req.extra.push({t:''}); render(); const ta = document.querySelector(`[data-rqx="${S.req.extra.length-1}"]`); if(ta) ta.focus(); return; }
+  if(a==='rq-reset'){ S.req.sel = {}; S.req.edit = {}; S.req.extra = []; render(); return; }
+  if(a==='rq-copy'){ copy(reqText()); return; }
+  if(a==='rq-doc'){ download(`Запрос-документов_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${today()}.doc`, reqDocHtml(), 'application/msword'); return; }
+  if(a==='rq-mail'){ copy(reqText()); location.href = 'mailto:?subject=' + encodeURIComponent('Запрос документов для заключения договора'); return; }
   if(a==='all-ok'){ r.scope.forEach(n=>{ S.cl[n]=Object.assign({},S.cl[n],{q:'ok'}); }); render(); return; }
   if(a==='clear-cl'){ S.cl = {}; render(); return; }
   if(a==='print'){ window.print(); return; }
@@ -1256,30 +1801,11 @@ document.addEventListener('click', e=>{
     download(`Заключение_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${S.date}.doc`, html, 'application/msword');
     return;
   }
-  if(a==='copy-request'){
-    const lines = [
-      `Запрос документов и сведений для комплаенс-проверки`,
-      `Контрагент: ${S.cp||'—'}${S.inn?`, ИНН ${S.inn}`:''}`,
-      `Предмет: ${r.subj.t}. Уровень проверки: ${LVL_NAME[r.lvl].toLowerCase()}.`,
-      ``,
-      `Анкета: ${r.anketa} (Приложение № 4 к Регламенту).`,
-      ``,
-      `Документы (Приложение № 3):`,
-    ];
-    r.blocks.forEach(b=>{
-      lines.push(`Блок ${b==='A'?'А':b==='B'?'Б':'В'}:`);
-      DOCS[b].forEach((d,i)=>lines.push(`  ${i+1}. ${d}`));
-    });
-    lines.push('');
-    lines.push('Документы, доступные в открытых источниках (ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, реестры СРО и лицензий, картотеки судебных дел и исполнительных производств), не запрашиваются: они получаются самостоятельно.');
-    lines.push('Срок давности документов — не более 3 месяцев на дату представления, если не указано иное.');
-    copy(lines.join('\n'));
-    return;
-  }
   if(a==='save-reg'){
     if(!S.cp){ toast('Не указан контрагент'); return; }
     const rec = {
-      cp:S.cp, inn:S.inn, orgName:r.org.name, subject:r.subj.t, sum:r.sum,
+      cp:S.cp, inn:S.inn, orgName:orgName(), subject:r.subj.t, sum:r.own,
+      contracts: r.contracts.map(c=>`${c.org||'—'}: ${c.what||'—'}, ${money(c.sum)} ₽`).join(' | '),
       lvl:r.lvl, num:S.num, date:S.date, verdict:r.verdictText,
       mitig: TERMS.map((tt,i)=> (S.terms[i]||(i===0&&r.lvl>=2)) ? tt : null).filter(Boolean).join('; '),
       decision: r.needP83 ? (S.decision||'требуется') : '',
@@ -1290,9 +1816,9 @@ document.addEventListener('click', e=>{
     save(LS.reg,REG); toast('Внесено в Реестр контрагентов'); return;
   }
   if(a==='csv' || a==='copy-csv'){
-    const head = ['№','Контрагент','ИНН','Организация Группы','Предмет','Сумма','Уровень риска','№ Заключения','Дата','Вывод','Меры митигации','Решение по п. 8.3','Действует до','Дата мониторинга'];
+    const head = ['№','Контрагент','ИНН','Организация Группы','Предмет','Сумма','Уровень риска','№ Заключения','Дата','Вывод','Меры митигации','Решение по п. 8.3','Действует до','Дата мониторинга','Действующие договоры'];
     const q = s => `"${String(s==null?'':s).replace(/"/g,'""')}"`;
-    const csv = [head.map(q).join(';')].concat(REG.map((x,i)=>[i+1,x.cp,x.inn,x.orgName,x.subject,x.sum,LVL_NAME[x.lvl],x.num,rus(x.date),x.verdict,x.mitig,x.decision,rus(x.validUntil),x.monitor?rus(x.monitor):''].map(q).join(';'))).join('\r\n');
+    const csv = [head.map(q).join(';')].concat(REG.map((x,i)=>[i+1,x.cp,x.inn,x.orgName,x.subject,x.sum,LVL_NAME[x.lvl],x.num,rus(x.date),x.verdict,x.mitig,x.decision,rus(x.validUntil),x.monitor?rus(x.monitor):'',x.contracts||''].map(q).join(';'))).join('\r\n');
     if(a==='csv') download('Реестр-комплаенс-проверок.csv', csv, 'text/csv;charset=utf-8');
     else copy(csv);
     return;
@@ -1313,15 +1839,17 @@ document.addEventListener('click', e=>{
     save(LS.orgs,ORGS); render(); return;
   }
   if(a==='org-export'){
-    const j = JSON.stringify(ORGS,null,2);
+    const j = JSON.stringify({orgs:ORGS, excl:EXCL},null,2);
     copy(j); download('porogi-organizaciy.json', j, 'application/json'); return;
   }
   if(a==='org-import'){
     const txt = prompt('Вставьте JSON справочника организаций:');
     if(!txt) return;
     try{
-      const d = JSON.parse(txt);
-      if(!Array.isArray(d)){ toast('Ожидался массив организаций'); return; }
+      const raw = JSON.parse(txt);
+      const d = Array.isArray(raw) ? raw : (raw && raw.orgs);
+      if(!Array.isArray(d)){ toast('Ожидался справочник организаций'); return; }
+      if(raw && Array.isArray(raw.excl)){ EXCL = cleanExcl(raw.excl); save(LS.excl,EXCL); }
       ORGS = d.map((o,i)=>({
         id: Number(o.id)||i+1, name:String(o.name||''), inn:String(o.inn||''), role:String(o.role||''),
         porog:Number(o.porog)||0, base:Number(o.base)||0, std:Number(o.std)||0, prikaz:String(o.prikaz||''),
@@ -1332,6 +1860,43 @@ document.addEventListener('click', e=>{
     return;
   }
 });
+
+/* ====================== приём сделки и настроек по ссылке ====================== */
+function cleanOrgs(d){
+  return d.map((o,i)=>({ id:Number(o.id)||i+1, name:String(o.name||''), inn:String(o.inn||''), role:String(o.role||''),
+    porog:Number(o.porog)||0, base:Number(o.base)||0, std:Number(o.std)||0, prikaz:String(o.prikaz||'') }));
+}
+function cleanExcl(d){
+  return d.map(x=>({ inn:String(x.inn||''), name:String(x.name||''), kind:EXCL_NAME[x.kind]?x.kind:'mono' }));
+}
+function takeDeal(d){
+  if(!d || typeof d!=='object' || Array.isArray(d)){ toast('Это не файл сделки'); return; }
+  if((S.cp||S.inn) && !confirm('Открыть полученную сделку? Текущий черновик будет заменён.')) return;
+  S = hydrate(d);
+  /* у комплаенс-менеджера свой справочник: организация ищется по названию, а не по номеру */
+  const byName = ORGS.find(o=>o.name && o.name===S.orgText);
+  if(byName) S.org = byName.id; else if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
+  if(!S.date) S.date = today();
+  ROLE = 'km'; try{ localStorage.setItem(LS.role, ROLE); }catch(e){}
+  view='check'; step=1; autoErr=''; render(); toast('Сделка от инициатора загружена');
+}
+function readHash(){
+  const h = location.hash || '';
+  const m = h.match(/^#(init|deal)=(.+)$/);
+  if(!m) return;
+  let d; try{ d = unpack(m[2]); }catch(e){ toast('Ссылка повреждена — попросите прислать её заново'); return; }
+  history.replaceState(null, '', baseUrl());
+  if(m[1]==='deal'){ takeDeal(d); return; }
+  if(!d || !Array.isArray(d.orgs)) return;
+  if(ROLE==='km' && ORGS.length && !confirm('Ссылка для инициаторов заменит справочник организаций и перечень исключений в этом браузере. Продолжить?')) return;
+  ORGS = cleanOrgs(d.orgs); EXCL = cleanExcl(Array.isArray(d.excl)?d.excl:[]);
+  save(LS.orgs,ORGS); save(LS.excl,EXCL);
+  ROLE = 'init'; try{ localStorage.setItem(LS.role, ROLE); }catch(e){}
+  if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
+  view='check'; step=1;
+}
+window.addEventListener('hashchange', ()=>{ readHash(); render(); });
+readHash();
 
 /* тема */
 document.getElementById('theme').addEventListener('click', ()=>{
