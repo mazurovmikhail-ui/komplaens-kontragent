@@ -467,7 +467,7 @@ const blank = () => ({
   excl:'', p46:[], km:'',
   lvlManual:0, lvlWhy:'',
   cl:{}, crit:{}, flags:[], mitig:{}, terms:{}, concl:'', decision:'',
-  monitor:'',
+  monitor:'', received:'',
   hasContracts:'', contracts:[],            /* действующие договоры с контрагентом */
   req:{sel:{}, edit:{}, extra:[], due:'', to:'', sign:''},   /* запрос документов */
   auto:null,                                /* результат автопроверки: суды, ФССП, ЕФРСБ */
@@ -516,6 +516,27 @@ function unpack(str){
 }
 function baseUrl(){ return location.href.split('#')[0]; }
 function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('on'),1900); }
+/* рабочие дни: суббота и воскресенье пропускаются; праздничные дни и переносы не учитываются */
+function addWorkdays(iso, n){
+  const d = new Date(iso + 'T12:00:00'); let left = n;
+  while(left > 0){ d.setDate(d.getDate()+1); const w = d.getDay(); if(w !== 0 && w !== 6) left--; }
+  return d.toISOString().slice(0,10);
+}
+function nextNum(){
+  const y = (S.date||today()).slice(0,4);
+  const nums = REG.map(x=>String(x.num||'')).filter(Boolean);
+  const last = nums.find(x=>/\d+\s*$/.test(x));
+  if(last){ const m = last.match(/^(.*?)(\d+)\s*$/); const same = m[1].includes(y) || !/20\d\d/.test(m[1]);
+    if(same) return m[1] + String(Number(m[2])+1).padStart(m[2].length,'0'); }
+  return `КМ-${y}/001`;
+}
+function regAlerts(){
+  const t = today(), soon = addMonths(t, 1);
+  const expired = REG.filter(x=>x.validUntil && x.validUntil < t);
+  const expiring = REG.filter(x=>x.validUntil && x.validUntil >= t && x.validUntil <= soon);
+  const monitor = REG.filter(x=>x.lvl===3 && !(x.validUntil && x.validUntil < t) && addMonths(x.monitor || x.date || t, 3) <= t);
+  return {expired, expiring, monitor, total:expired.length + expiring.length + monitor.length};
+}
 function addMonths(iso,m){ const d=new Date(iso); d.setMonth(d.getMonth()+m); return d.toISOString().slice(0,10); }
 function copy(text){
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -707,6 +728,9 @@ function calc(){
   CRIT.forEach(c=>{ const q=S.crit[c.n]; if(q && q!=='no' && !((S.crit[c.n+'_why']||'').trim())) r.missing.push(`Прил. № 6, п. ${c.n}`); });
 
   r.validUntil = S.date ? addMonths(S.date, r.valid) : '';
+  r.received = S.received || (S.fromInit && S.fromInit.at) || S.date || today();
+  r.deadline = addWorkdays(r.received, r.days);
+  r.late = !r.skip && r.deadline < today() && r.verdict === 'draft';
   return r;
 }
 
@@ -744,9 +768,12 @@ function autoHints(){
     if(p.massAddr > 0) flag(4, `«Прозрачный бизнес» относит адрес к адресам массовой регистрации`);
     if(p.capital > 0 && p.capital <= 10000 && r.sum > (r.org.base||0) && r.org.base) flag(6, `уставный капитал ${money(p.capital)} ₽ при сумме сделки ${money(r.sum)} ₽`);
     const f = p.fin[0];
+    if(a.bo && ((a.bo.net !== null && a.bo.net < 0) || (a.bo.profit !== null && a.bo.profit < 0)))
+      flag(7, [a.bo.profit < 0 ? `убыток за ${a.bo.year} год — ${money(-a.bo.profit)} ₽` : '', a.bo.net < 0 ? `капитал и резервы отрицательные: ${money(a.bo.net)} ₽` : ''].filter(Boolean).join('; ') + ' (ГИР БО)');
     if(f && f.expense > f.revenue) flag(7, `за ${f.year} год расходы ${money(f.expense)} ₽ превышают доходы ${money(f.revenue)} ₽`);
     if(p.invalid) crit(1, '«Прозрачный бизнес» показывает отметку о недостоверности сведений');
     if(p.arrears > 0 || p.debtToBailiff) crit(11, p.debtToBailiff ? 'есть задолженность по налогам, направленная на взыскание приставу' : `сведения о недоимке: записей — ${p.arrears}`);
+    if(a.bo && a.bo.assets > 0 && r.sum > a.bo.assets) crit(12, `сумма сделки ${money(r.sum)} ₽ больше активов контрагента за ${a.bo.year} год (${money(a.bo.assets)} ₽)`);
     if(f && f.revenue > 0 && r.sum > f.revenue) crit(12, `сумма сделки ${money(r.sum)} ₽ больше выручки за ${f.year} год (${money(f.revenue)} ₽)`);
     if(p.liquidated || (p.status && !/действующ/i.test(p.status))) crit(2, `статус в «Прозрачном бизнесе»: ${p.status || 'ликвидировано'}`);
   }
@@ -986,7 +1013,7 @@ function docCard(){
 
   const a = S.auto && S.auto.inn === digits(S.inn) ? S.auto : null;
   const auto = !extVersion() ? '' : autoBusy
-    ? `<div class="verdict v-off" style="margin:10px 0 0"><b>Идёт автопроверка</b>ЕГРЮЛ, «Прозрачный бизнес», арбитражные дела и ЕФРСБ — 30–40 секунд. Можно продолжать заполнять сделку.</div>`
+    ? `<div class="verdict v-off" style="margin:10px 0 0"><b>Идёт автопроверка</b>ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, арбитражные дела и ЕФРСБ — около 40 секунд. Можно продолжать заполнять сделку.</div>`
     : a ? `<div class="verdict ${a.bk && a.bk.n ? 'v-neg' : 'v-ok'}" style="margin:10px 0 0"><b>Автопроверка выполнена ${esc(stamp(a.at))}</b>${[
         a.egrul ? `ЕГРЮЛ: ${esc(a.egrul.name)}, зарегистрировано ${esc(a.egrul.reg)}${a.egrul.ended?`, деятельность прекращена ${esc(a.egrul.ended)}`:''}` : '',
         a.pb ? `статус — ${esc((a.pb.status||'не указан').toLowerCase())}${a.pb.fin[0]?`, доходы за ${a.pb.fin[0].year} — ${money(a.pb.fin[0].revenue)} ₽`:''}` : '',
@@ -1248,7 +1275,10 @@ function renderS1(){
           <option value="new"${sel('new',S.hist)}>Новый контрагент либо есть замечания</option>
         </select>
       </label>
-      ${ROLE==='km'?`<label class="f">Дата проверки
+      ${ROLE==='km'?`<label class="f">Сделка поступила на проверку <span class="hint">от этой даты считается срок Стадии 0</span>
+        <input type="date" data-f="received" value="${esc(S.received || (S.fromInit && S.fromInit.at) || S.date)}">
+      </label>
+      <label class="f">Дата Заключения
         <input type="date" data-f="date" value="${esc(S.date)}">
       </label>`:''}
     </div>
@@ -1446,7 +1476,11 @@ async function autoCheck(){
         taxes:Number(d.pb.taxes)||0, taxesYear:Number(d.pb.taxesYear)||0,
         fin:(d.pb.fin||[]).slice(0,3).map(x=>({year:Number(x.year)||0, revenue:Number(x.revenue)||0, expense:Number(x.expense)||0})),
         arrears:Number(d.pb.arrears)||0, arrearsSum:Number(d.pb.arrearsSum)||0, offenses:Number(d.pb.offenses)||0} : null;
-    S.auto = {at:d.at, inn, errors:d.errors||{}, enf:keepEnf||null, egrul:eg, pb,
+    const nn = v => (v===null || v===undefined) ? null : (Number(v)||0);
+    const bo = d.bo ? {year:Number(d.bo.year)||0, filed:str(d.bo.filed,10), assets:nn(d.bo.assets), assetsPrev:nn(d.bo.assetsPrev), net:nn(d.bo.net), netPrev:nn(d.bo.netPrev),
+        receivables:nn(d.bo.receivables), payables:nn(d.bo.payables), loansShort:nn(d.bo.loansShort), loansLong:nn(d.bo.loansLong),
+        revenue:nn(d.bo.revenue), revenuePrev:nn(d.bo.revenuePrev), profit:nn(d.bo.profit), profitPrev:nn(d.bo.profitPrev)} : null;
+    S.auto = {at:d.at, inn, errors:d.errors||{}, enf:keepEnf||null, egrul:eg, pb, bo,
       kad: d.kad ? {def:{n:Number(d.kad.def.n)||0, nYear:Number(d.kad.def.nYear)||0,
                          rows:(d.kad.def.rows||[]).slice(0,15).map(x=>({num:str(x.num,60), url:safeUrl(x.url), date:str(x.date,20), court:str(x.court,160),
                                plaintiffs:(x.plaintiffs||[]).slice(0,4).map(n=>str(n,160))}))},
@@ -1503,6 +1537,20 @@ function autoNotes(){
     if(p.fin.length) put(23, `${src} ${p.fin.map(x=>`${x.year} год: доходы ${money(x.revenue)} ₽, расходы ${money(x.expense)} ₽, разница ${money(x.revenue-x.expense)} ₽`).join('; ')}. Уставный капитал — ${money(p.capital)} ₽. Чистые активы, дебиторская и кредиторская задолженность — по ГИР БО.`, false);
     if(f && f.revenue && r.sum) put(24, `${src} Сумма сделки ${money(r.sum)} ₽ составляет ${(r.sum/f.revenue*100).toFixed(1).replace('.',',')} % доходов контрагента за ${f.year} год (${money(f.revenue)} ₽). Соотношение с активами — по ГИР БО.`, false);
   }
+  if(a.bo){
+    const b = a.bo, r = calc(), m = v => v===null ? 'нет данных' : money(v) + ' ₽';
+    const head = `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — ГИР БО (bo.nalog.gov.ru), отчётность за ${b.year} год.`;
+    const pbPart = (S.cl[23] && S.cl[23].note && S.cl[23].note.startsWith(AUTO_MARK) && S.cl[23].note.includes('Прозрачный бизнес')) ? ' ' + S.cl[23].note.replace(/^.*?pb\.nalog\.ru\)\.\s*/, '«Прозрачный бизнес»: ').replace(/\s*Чистые активы, дебиторская и кредиторская задолженность — по ГИР БО\./,'') : '';
+    S.cl[23] = Object.assign({}, S.cl[23], {note: (!(S.cl[23]||{}).note || S.cl[23].note.startsWith(AUTO_MARK))
+      ? `${head} Выручка ${m(b.revenue)} (годом ранее ${m(b.revenuePrev)}), чистая прибыль ${m(b.profit)} (годом ранее ${m(b.profitPrev)}), активы ${m(b.assets)} (годом ранее ${m(b.assetsPrev)}), капитал и резервы ${m(b.net)} (годом ранее ${m(b.netPrev)}), дебиторская задолженность ${m(b.receivables)}, кредиторская ${m(b.payables)}, заёмные средства: краткосрочные ${m(b.loansShort)}, долгосрочные ${m(b.loansLong)}.${pbPart}`
+      : S.cl[23].note});
+    if(r.sum && (b.revenue || b.assets)){
+      const pct = (x)=> (r.sum/x*100).toFixed(1).replace('.',',') + ' %';
+      S.cl[24] = Object.assign({}, S.cl[24], {note: (!(S.cl[24]||{}).note || S.cl[24].note.startsWith(AUTO_MARK))
+        ? `${head} Сумма сделки ${money(r.sum)} ₽: ${b.revenue ? `${pct(b.revenue)} выручки (${money(b.revenue)} ₽)` : 'выручки нет'}; ${b.assets ? `${pct(b.assets)} активов (${money(b.assets)} ₽)` : 'активов нет'}.`
+        : S.cl[24].note});
+    }
+  }
   if(a.kad){
     const k = a.kad;
     const last = k.def.rows.slice(0,5).map(x=>`${x.num} от ${x.date}${x.plaintiffs.length?`, истец ${x.plaintiffs.join(', ')}`:''}`).join('; ');
@@ -1530,6 +1578,7 @@ function autoReportHtml(){
 ${a.egrul?`<p><b>ЕГРЮЛ (egrul.nalog.ru).</b> ${esc(a.egrul.full||a.egrul.name)}, ОГРН ${esc(a.egrul.ogrn)}, дата регистрации ${esc(a.egrul.reg)}${a.egrul.head?`. ${esc(nodot(a.egrul.head))}`:''}${a.egrul.ended?`. Деятельность прекращена ${esc(a.egrul.ended)}`:''}.</p>`:''}
 ${a.pb?`<p><b>«Прозрачный бизнес» (pb.nalog.ru).</b> Статус: ${esc(a.pb.status)}. Недостоверность сведений: ${a.pb.invalid?'есть':'нет'}. Адрес массовой регистрации: ${a.pb.massAddr?'да':'нет'}. ОКВЭД ${esc(a.pb.okved)} ${esc(a.pb.okvedName)}. Уставный капитал ${money(a.pb.capital)} ₽. Среднесписочная численность: ${a.pb.staff===null?'нет данных':a.pb.staff}. Уплачено налогов: ${money(a.pb.taxes)} ₽. Сведения о недоимке: ${a.pb.arrears?'есть':'нет'}; задолженность у приставов: ${a.pb.debtToBailiff?'есть':'нет'}.</p>
 ${tbl(['Год','Доходы, ₽','Расходы, ₽'], a.pb.fin.map(x=>[x.year, money(x.revenue), money(x.expense)]))}`:''}
+${a.bo?`<p><b>Бухгалтерская отчётность за ${a.bo.year} год (bo.nalog.gov.ru).</b> Выручка ${a.bo.revenue===null?'—':money(a.bo.revenue)+' ₽'}, чистая прибыль ${a.bo.profit===null?'—':money(a.bo.profit)+' ₽'}, активы ${a.bo.assets===null?'—':money(a.bo.assets)+' ₽'}, капитал и резервы ${a.bo.net===null?'—':money(a.bo.net)+' ₽'}, дебиторская задолженность ${a.bo.receivables===null?'—':money(a.bo.receivables)+' ₽'}, кредиторская ${a.bo.payables===null?'—':money(a.bo.payables)+' ₽'}.</p>`:''}
 ${a.kad?`<p><b>Арбитражные дела (kad.arbitr.ru).</b> Ответчик: ${a.kad.def.n}, из них за последние 12 месяцев — ${a.kad.def.nYear}. Истец: ${a.kad.pl.n}.</p>
 ${tbl(['Дело','Дата','Суд','Истец'], a.kad.def.rows.map(x=>[x.num, x.date, x.court, x.plaintiffs.join(', ')]))}`:'<p><b>Арбитражные дела.</b> Не проверялись.</p>'}
 ${a.bk?`<p><b>ЕФРСБ (bankrot.fedresurs.ru).</b> Записей в реестре должников: ${a.bk.n}.</p>
@@ -1554,12 +1603,13 @@ function autoCard(){
       <button class="btn ghost" data-view="orgs">Как поставить расширение</button>
     </div>`;
   } else if(autoBusy){
-    body = `<p class="muted" style="margin:0">Открываю ЕГРЮЛ, «Прозрачный бизнес», картотеку арбитражных дел и ЕФРСБ в фоновых вкладках, это занимает 30–40 секунд. Вкладки закроются сами.</p>`;
+    body = `<p class="muted" style="margin:0">Открываю ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, картотеку арбитражных дел и ЕФРСБ в фоновых вкладках, это занимает около 40 секунд. Вкладки закроются сами.</p>`;
   } else {
     body = `${autoErr?`<div class="verdict v-neg"><b>Часть проверки не прошла</b>${esc(autoErr)}</div>`:''}
     ${a ? `<div class="scroll"><table class="t"><tbody>
       ${a.egrul?`<tr><th style="width:34%">ЕГРЮЛ</th><td>${esc(a.egrul.name)}, ОГРН ${esc(a.egrul.ogrn)}, зарегистрировано ${esc(a.egrul.reg)}${a.egrul.ended?` · <b>деятельность прекращена ${esc(a.egrul.ended)}</b>`:''}</td></tr>`:''}
       ${a.pb?`<tr><th style="width:34%">«Прозрачный бизнес»</th><td>${esc(a.pb.status||'статус не указан')}${a.pb.invalid?' · <b>недостоверность сведений</b>':''}${a.pb.massAddr?' · <b>массовый адрес</b>':''}${a.pb.arrears||a.pb.debtToBailiff?' · <b>налоговая задолженность</b>':''}<br><span class="muted">ОКВЭД ${esc(a.pb.okved)} ${esc(a.pb.okvedName)}</span><br>численность — ${a.pb.staff===null?'нет данных':a.pb.staff}, налогов уплачено — ${money(a.pb.taxes)} ₽${a.pb.fin[0]?`, доходы за ${a.pb.fin[0].year} — ${money(a.pb.fin[0].revenue)} ₽, расходы — ${money(a.pb.fin[0].expense)} ₽`:''}</td></tr>`:''}
+      ${a.bo?`<tr><th style="width:34%">Отчётность за ${a.bo.year} год (ГИР БО)</th><td>выручка — ${a.bo.revenue===null?'нет данных':money(a.bo.revenue)+' ₽'}, чистая прибыль — ${a.bo.profit===null?'нет данных':money(a.bo.profit)+' ₽'}<br>активы — ${a.bo.assets===null?'нет данных':money(a.bo.assets)+' ₽'}, капитал и резервы — ${a.bo.net===null?'нет данных':(a.bo.net<0?'<b>':'')+money(a.bo.net)+' ₽'+(a.bo.net<0?'</b>':'')}</td></tr>`:''}
       <tr><th style="width:34%">Арбитражные дела, ответчик</th><td>${a.kad?`<b>${a.kad.def.n}</b>, из них за последние 12 месяцев — <b>${a.kad.def.nYear}</b>`:'<span class="muted">нет данных</span>'}</td></tr>
       <tr><th>Арбитражные дела, истец</th><td>${a.kad?a.kad.pl.n:'<span class="muted">нет данных</span>'}</td></tr>
       <tr><th>Банкротство (ЕФРСБ)</th><td>${a.bk?(a.bk.n?`<b>найдено записей: ${a.bk.n}</b>`:'в реестре должников не значится'):'<span class="muted">нет данных</span>'}</td></tr>
@@ -1578,7 +1628,7 @@ function autoCard(){
     </div>`;
   }
   return `<div class="card">
-    <div class="hd"><h2>Суды, банкротство, приставы</h2><span class="ref">ЕГРЮЛ, «Прозрачный бизнес», суды, ЕФРСБ, ФССП · через расширение${extVersion()?` ${esc(extVersion())}`:''}</span></div>
+    <div class="hd"><h2>Суды, банкротство, приставы</h2><span class="ref">ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, суды, ЕФРСБ, ФССП · через расширение${extVersion()?` ${esc(extVersion())}`:''}</span></div>
     ${body}
   </div>`;
 }
@@ -1778,6 +1828,7 @@ function concText(){
 }
 
 function renderS6(){
+  if(!S.num && ROLE==='km') S.num = nextNum();
   const r = calc();
   const vcls = {ok:'v-ok', cond:'v-cond', neg:'v-neg', skip:'v-off', draft:'v-off'}[r.verdict];
   document.getElementById('s6').innerHTML = `
@@ -1793,6 +1844,7 @@ function renderS6(){
     ${r.missing.length?`<div class="verdict v-cond" style="margin-top:12px"><b>Не заполнено обоснование</b>${esc(r.missing.join(', '))}. Оценочные выводы без фактических показателей Приложением № 5 не допускаются.</div>`:''}
     <div class="btnrow">
       <button class="btn primary" data-act="save-reg">Внести в Реестр контрагентов</button>
+      <button class="btn" data-act="dossier">Собрать досье</button>
       <button class="btn" data-act="copy-concl">Копировать текст Заключения</button>
       <button class="btn" data-act="doc-concl">Скачать .doc</button>
       <button class="btn ghost" data-act="print">Печать</button>
@@ -1814,7 +1866,7 @@ function renderSide(){
   <div class="card" style="padding:14px 15px">
     <div class="verdict ${vcls}"><b>${esc(r.verdictText)}</b>${esc(r.skip? r.skipWhy : (r.verdictWhy||''))}</div>
     <div class="sum-line"><span>Уровень риска</span><span><span class="badge ${LVL_CLASS[r.lvl]}">${LVL_NAME[r.lvl]}</span></span></div>
-    <div class="sum-line"><span>Срок Стадии 0</span><span>до ${r.days} р.д.</span></div>
+    <div class="sum-line"><span>Срок Стадии 0</span><span>${r.days} р.д. · до ${rus(r.deadline)}${r.late?' <span class="badge b-deep">просрочен</span>':''}</span></div>
     ${ROLE==='km'?`<div class="sum-line"><span>Позиции чек-листа</span><span>${r.done} / ${r.scope.length}</span></div>`:''}
     ${r.linked?`<div class="sum-line"><span>Сумма с учётом п. 4.4</span><span>${money(r.sum)} ₽</span></div>`:''}
     <div class="sum-line"><span>Анкета</span><span>${esc(r.anketa)}</span></div>
@@ -1854,6 +1906,12 @@ function renderRegistry(){
   document.getElementById('v-registry').innerHTML = `
   <div class="card" style="margin-top:18px">
     <div class="hd"><h2>Реестр комплаенс-проверок контрагентов</h2><span class="ref">Приложение № 8 · записей: ${REG.length}</span></div>
+    ${(()=>{ const al = regAlerts(); if(!al.total) return ''; const names = l => l.slice(0,6).map(x=>esc(x.cp)).join(', ') + (l.length>6?` и ещё ${l.length-6}`:'');
+      return `<div class="verdict v-cond"><b>Требуют внимания</b>${[
+        al.monitor.length ? `Пора проводить квартальный мониторинг (углублённый уровень, п. 10.1): ${names(al.monitor)}.` : '',
+        al.expiring.length ? `Заключение истекает в ближайший месяц: ${names(al.expiring)}.` : '',
+        al.expired.length ? `Срок Заключения истёк: ${names(al.expired)}.` : '',
+      ].filter(Boolean).join('<br>')}</div>`; })()}
     <p class="small muted" style="margin-top:0">Реестр единый для всех организаций Группы, актуализируется в течение 1 рабочего дня с даты оформления Заключения либо проведения мониторинга. Мониторинг контрагентов углублённого уровня — не реже одного раза в квартал (п. 10.1).</p>
     <div class="scroll"><table class="t">
       <thead><tr><th>№</th><th>Контрагент</th><th>ИНН</th><th>Организация Группы</th><th>Предмет и сумма</th><th>Уровень</th><th>Заключение</th><th>Вывод</th><th>Митигация</th><th>Решение по п. 8.3</th><th>Действует до</th><th>Мониторинг</th><th></th></tr></thead>
@@ -1957,8 +2015,10 @@ function renderHelp(){
       <li>Объём чек-листа: базовый — позиции 1–7 и 19–21, стандартный — 1–14 и 19–24, углублённый — все 28.</li>
       <li>Сроки Стадии 0 (1 / 2 / 5 рабочих дней), срок действия Заключения (12 / 12 / 6 месяцев), перечень документов для запроса.</li>
       <li>Сделка из файла договора: стороны, ИНН, ОГРН, предмет, цена и аванс читаются из .docx или текстового PDF прямо в браузере, после чего сама запускается автопроверка.</li>
+      <li>Номер Заключения — следующий по Реестру; срок Стадии 0 — в рабочих днях от даты поступления сделки (выходные пропускаются, праздники не учитываются); в Реестре — кому пора проводить квартальный мониторинг и у кого Заключение истекает или истекло.</li>
+      <li>Досье одной кнопкой: Заключение, справка автопроверки, запрос документов и файл с данными проверки.</li>
       <li>Подсказки по Приложению № 6: если автопроверка нашла массовый адрес, численность 0–1, расходы выше доходов, недоимку, банкротство и подобное, на шаге «Стоп-факторы» появляется предложение отметить нужную позицию. Отмечает её комплаенс-менеджер.</li>
-      <li>Сведения ЕГРЮЛ и «Прозрачного бизнеса» (статус, недостоверность, массовый адрес, ОКВЭД, налоговый режим, недоимка, численность, уплаченные налоги, доходы и расходы за три года), арбитражные дела, сведения ЕФРСБ и исполнительные производства по ИНН контрагента — через расширение для Chrome (как поставить, написано на вкладке «Настройки»). Итог раскладывается по позициям 9–11 чек-листа. Код с картинки на сайте ФССП вводит человек.</li>
+      <li>Сведения ЕГРЮЛ и «Прозрачного бизнеса» (статус, недостоверность, массовый адрес, ОКВЭД, налоговый режим, недоимка, численность, уплаченные налоги, доходы и расходы за три года), бухгалтерская отчётность из ГИР БО (выручка, прибыль, активы, капитал, задолженность), арбитражные дела, сведения ЕФРСБ и исполнительные производства по ИНН контрагента — через расширение для Chrome (как поставить, написано на вкладке «Настройки»). Итог раскладывается по позициям 9–11 чек-листа. Код с картинки на сайте ФССП вводит человек.</li>
       <li>Обязательность привлечения профильных подразделений (п. 6.4) и налоговой оговорки (п. 12.5).</li>
       <li>Вывод по п. 7.9 и необходимость решения по п. 8.3, включая согласование управляющего партнёра.</li>
     </ul>
@@ -1984,6 +2044,7 @@ function render(){
     document.getElementById('v-'+v).classList.toggle('hidden', v!==view);
   });
   document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected', t.dataset.view===view));
+  { const tb = document.querySelector('.tab[data-view="registry"]'), n = regAlerts().total; if(tb) tb.textContent = n ? `Реестр · ${n}` : 'Реестр'; }
   if(view==='check'){
     renderSteps();
     [1,2,3,4,5,6].forEach(n=>document.getElementById('s'+n).classList.toggle('hidden', n!==step));
@@ -2009,7 +2070,7 @@ document.addEventListener('input', e=>{
     S[k] = (t.type==='checkbox') ? t.checked : t.value;
     if(k==='pay' && t.value!=='avans') S.avans = '';
     if(k==='lvlManual') S.lvlManual = Number(t.value)||0;
-    if(['org','subj','pay','fin','age','hist','excl','lvlManual','reason','hasContracts'].includes(k)) render();
+    if(['org','subj','pay','fin','age','hist','excl','lvlManual','reason','hasContracts','received','date'].includes(k)) render();
     else {
       renderSide(); renderSteps(); save(LS.draft,S);
       if(!t.closest('#s1-out')) renderS1Out();
@@ -2145,6 +2206,17 @@ document.addEventListener('click', e=>{
   if(a==='clear-cl'){ S.cl = {}; render(); return; }
   if(a==='print'){ window.print(); return; }
   if(a==='copy-concl'){ copy(concText()); return; }
+  if(a==='dossier'){
+    const nm = (S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-');
+    const wrap = t => `<html><head><meta charset="utf-8"></head><body style="font-family:Times New Roman,serif;font-size:12pt"><pre style="white-space:pre-wrap;font-family:Times New Roman,serif">${esc(t)}</pre></body></html>`;
+    const files = [[`1_Заключение_${nm}_${S.date}.doc`, wrap(concText())]];
+    if(S.auto) files.push([`2_Автопроверка_${nm}_${S.date}.doc`, autoReportHtml()]);
+    if(!r.skip) files.push([`3_Запрос-документов_${nm}_${S.date}.doc`, reqDocHtml()]);
+    files.push([`4_Данные-проверки_${nm}_${S.date}.json`, JSON.stringify(S,null,2)]);
+    files.forEach((f,i)=>setTimeout(()=>download(f[0], f[1], f[0].endsWith('.json')?'application/json':'application/msword'), i*450));
+    toast(`Файлов в досье: ${files.length}. Если браузер спросит про несколько загрузок — разрешите`);
+    return;
+  }
   if(a==='doc-concl'){
     const html = `<html><head><meta charset="utf-8"></head><body style="font-family:Times New Roman,serif;font-size:12pt"><pre style="white-space:pre-wrap;font-family:Times New Roman,serif">${esc(concText())}</pre></body></html>`;
     download(`Заключение_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${S.date}.doc`, html, 'application/msword');

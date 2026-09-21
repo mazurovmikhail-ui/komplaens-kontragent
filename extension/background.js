@@ -143,6 +143,27 @@ async function pbInPage(inn){
  }catch(e){ return {error:String(e && e.message || e)}; }
 }
 
+/* ---------- выполняется внутри страницы bo.nalog.gov.ru (ГИР БО) ---------- */
+async function boInPage(inn){
+ try{
+  const get = async url => { const r = await fetch(url, {credentials:'include'}); if(r.status !== 200) throw new Error('ГИР БО ответил кодом ' + r.status); return r.json(); };
+  const s = await get('/advanced-search/organizations/search?query=' + encodeURIComponent(inn) + '&page=0');
+  const o = (s.content||[]).find(x => String(x.inn||'').replace(/<[^>]+>/g,'') === inn);
+  if(!o) return {found:false};
+  const list = (await get('/nbo/organizations/' + o.id + '/bfo/')) || [];
+  list.sort((p,q) => q.period - p.period);
+  if(!list.length) return {found:false};
+  const det = await get('/nbo/bfo/' + list[0].id + '/details');
+  const d = Array.isArray(det) ? det[0] : det;
+  const b = (d && d.balance) || {}, f = (d && d.financialResult) || {};
+  const rub = x => (x === null || x === undefined) ? null : Number(x) * 1000;      /* отчётность хранится в тысячах рублей */
+  return {found:true, year:Number(list[0].period)||0, years:list.map(x => Number(x.period)||0).slice(0,5), filed:(d && d.datePresent || '').slice(0,10),
+    assets:rub(b.current1600), assetsPrev:rub(b.previous1600), net:rub(b.current1300), netPrev:rub(b.previous1300),
+    receivables:rub(b.current1230), payables:rub(b.current1520), loansShort:rub(b.current1510), loansLong:rub(b.current1410),
+    revenue:rub(f.current2110), revenuePrev:rub(f.previous2110), profit:rub(f.current2400), profitPrev:rub(f.previous2400)};
+ }catch(e){ return {error:String(e && e.message || e)}; }
+}
+
 /* ---------- выполняется внутри страницы bankrot.fedresurs.ru ---------- */
 async function efrsbInPage(inn){
  try{
@@ -165,12 +186,16 @@ async function efrsbInPage(inn){
 }
 
 async function runCheck(inn){
-  const out = {at:new Date().toISOString(), inn, egrul:null, pb:null, kad:null, bk:null, errors:{}};
+  const out = {at:new Date().toISOString(), inn, egrul:null, pb:null, bo:null, kad:null, bk:null, errors:{}};
   try{ const e = await inTab('https://egrul.nalog.ru/index.html', egrulInPage, [inn]); if(e.found) out.egrul = e; else out.errors.egrul = 'в ЕГРЮЛ по этому ИНН ничего не найдено'; }
   catch(e){ out.errors.egrul = String(e && e.message || e); }
   if(inn.length === 10){
     try{ const p = await inTab('https://pb.nalog.ru/search.html', pbInPage, [inn]); if(p.found) out.pb = p; else out.errors.pb = 'в «Прозрачном бизнесе» по этому ИНН ничего не найдено'; }
     catch(e){ out.errors.pb = String(e && e.message || e); }
+  }
+  if(inn.length === 10){
+    try{ const b = await inTab('https://bo.nalog.gov.ru/', boInPage, [inn]); if(b.found) out.bo = b; else out.errors.bo = 'в ГИР БО отчётности по этому ИНН нет'; }
+    catch(e){ out.errors.bo = String(e && e.message || e); }
   }
   try{ out.kad = await inTab('https://kad.arbitr.ru/', kadInPage, [inn]); }
   catch(e){ out.errors.kad = String(e && e.message || e); }
