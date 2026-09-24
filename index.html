@@ -1483,7 +1483,7 @@ async function autoCheck(){
   if(!extVersion()){ toast('Расширение не установлено — см. вкладку «Настройки»'); return; }
   autoBusy = true; autoErr = ''; render();
   try{
-    const d = await extCall('check', inn, 120000);
+    const d = await extCall('check', inn, 300000);
     const keepEnf = S.auto && S.auto.inn === inn ? S.auto.enf : null;
     const eg = d.egrul ? {name:str(d.egrul.name,200), full:str(d.egrul.full,300), ogrn:str(d.egrul.ogrn,15), kpp:str(d.egrul.kpp,9),
                           reg:str(d.egrul.reg,10), region:str(d.egrul.region,80), head:str(d.egrul.head,200), ended:str(d.egrul.ended,10)} : null;

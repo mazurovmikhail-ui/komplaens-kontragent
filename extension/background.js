@@ -7,25 +7,30 @@
 const APP_ORIGINS = ['https://mazurovmikhail-ui.github.io', 'http://localhost:8782'];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function waitComplete(tabId, timeout = 45000, host = 'сайт'){
-  return new Promise((resolve, reject)=>{
-    const timer = setTimeout(()=>{ chrome.tabs.onUpdated.removeListener(on); reject(new Error(host + ' не загрузился за 45 секунд — повторите проверку позже')); }, timeout);
-    function on(id, info){
-      if(id === tabId && info.status === 'complete'){ clearTimeout(timer); chrome.tabs.onUpdated.removeListener(on); resolve(); }
-    }
+/* Ждём, пока вкладка догрузится. Некоторые сайты (ГИР БО) держат страницу в состоянии «загружается»
+   долго после того, как их API уже отвечает, поэтому после мягкого предела идём дальше и пробуем
+   выполнить запрос; если страница так и не открылась, скрипт в ней не запустится и это станет ошибкой. */
+function waitLoaded(tabId, soft = 12000){
+  return new Promise(resolve=>{
+    const done = ()=>{ clearTimeout(timer); chrome.tabs.onUpdated.removeListener(on); resolve(); };
+    const timer = setTimeout(done, soft);
+    function on(id, info){ if(id === tabId && info.status === 'complete') done(); }
     chrome.tabs.onUpdated.addListener(on);
-    chrome.tabs.get(tabId, t=>{ if(t && t.status === 'complete'){ clearTimeout(timer); chrome.tabs.onUpdated.removeListener(on); resolve(); } });
+    chrome.tabs.get(tabId, t=>{ if(t && t.status === 'complete') done(); });
   });
 }
 
 async function inTab(url, func, args){
+  const host = new URL(url).host;
   const tab = await chrome.tabs.create({url, active:false});
   try{
-    await waitComplete(tab.id, 45000, new URL(url).host);
+    await waitLoaded(tab.id);
     await sleep(2500);                       /* сайту нужно время выставить свои защитные cookie */
-    const [r] = await chrome.scripting.executeScript({target:{tabId:tab.id}, world:'MAIN', func, args});
+    let r;
+    try{ [r] = await chrome.scripting.executeScript({target:{tabId:tab.id}, world:'MAIN', func, args}); }
+    catch(e){ throw new Error(host + ' не открылся — ' + String(e && e.message || e).replace(/^Error:\s*/,'') + '. Повторите проверку позже'); }
     const out = r && r.result;
-    if(!out) throw new Error((r && r.error && r.error.message) || 'сайт не вернул данные');
+    if(!out) throw new Error((r && r.error && r.error.message) || host + ' не вернул данные');
     if(out.error) throw new Error(out.error);
     return out;
   } finally {
