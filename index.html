@@ -766,17 +766,32 @@ function autoHints(){
   if(p){
     if(p.staff !== null && p.staff <= 1) flag(2, `среднесписочная численность за ${p.staffYear} год — ${p.staff}`);
     if(p.massAddr > 0) flag(4, `«Прозрачный бизнес» относит адрес к адресам массовой регистрации`);
+    const OKV_SUPPLY = ['45','46','47'].concat(Array.from({length:24},(_,i)=>String(10+i)));
+    const OKV = {podryad:['41','42','43'], tehzak:['41','42','43','71'], proekt:['71'], 'postavka-reg':OKV_SUPPLY, 'postavka-raz':OKV_SUPPLY, oborud:OKV_SUPPLY, arenda:['68','77']};
+    if(p.okved && OKV[r.subj.v] && !OKV[r.subj.v].includes(p.okved.slice(0,2))) flag(3, `основной ОКВЭД ${p.okved} (${p.okvedName}) не относится к предмету договора «${r.subj.t}»`);
+    (p.heads||[]).filter(h=>h.cnt > 10).forEach(h=>crit(4, `${h.name} значится руководителем в ${h.cnt} организациях`));
+    (p.founders||[]).filter(f=>f.cnt > 10).forEach(f=>crit(4, `${f.name} значится учредителем в ${f.cnt} организациях`));
     if(p.capital > 0 && p.capital <= 10000 && r.sum > (r.org.base||0) && r.org.base) flag(6, `уставный капитал ${money(p.capital)} ₽ при сумме сделки ${money(r.sum)} ₽`);
     const f = p.fin[0];
+    if(a.bo && a.bo.payablesPrev > 0 && a.bo.payables !== null && a.bo.payables >= 1.5 * a.bo.payablesPrev)
+      flag(7, `кредиторская задолженность выросла с ${money(a.bo.payablesPrev)} ₽ до ${money(a.bo.payables)} ₽ за ${a.bo.year} год (ГИР БО)`);
     if(a.bo && ((a.bo.net !== null && a.bo.net < 0) || (a.bo.profit !== null && a.bo.profit < 0)))
       flag(7, [a.bo.profit < 0 ? `убыток за ${a.bo.year} год — ${money(-a.bo.profit)} ₽` : '', a.bo.net < 0 ? `капитал и резервы отрицательные: ${money(a.bo.net)} ₽` : ''].filter(Boolean).join('; ') + ' (ГИР БО)');
     if(f && f.expense > f.revenue) flag(7, `за ${f.year} год расходы ${money(f.expense)} ₽ превышают доходы ${money(f.revenue)} ₽`);
     if(p.invalid) crit(1, '«Прозрачный бизнес» показывает отметку о недостоверности сведений');
-    if(p.arrears > 0 || p.debtToBailiff) crit(11, p.debtToBailiff ? 'есть задолженность по налогам, направленная на взыскание приставу' : `сведения о недоимке: записей — ${p.arrears}`);
+    if(p.arrears > 0 || p.debtToBailiff){
+      const t = Number(r.org.taxDebt)||0;
+      if(p.debtToBailiff) crit(11, 'есть задолженность по налогам, направленная на взыскание приставу');
+      else if(!t) crit(11, `недоимка${p.arrearsPeriod?` на ${p.arrearsPeriod}`:''} — ${money(p.arrearsSum)} ₽; порог по приказу организации в настройках не задан`);
+      else if(p.arrearsSum > t) crit(11, `недоимка${p.arrearsPeriod?` на ${p.arrearsPeriod}`:''} — ${money(p.arrearsSum)} ₽ превышает порог ${money(t)} ₽ по приказу организации`);
+    }
     if(a.bo && a.bo.assets > 0 && r.sum > a.bo.assets) crit(12, `сумма сделки ${money(r.sum)} ₽ больше активов контрагента за ${a.bo.year} год (${money(a.bo.assets)} ₽)`);
     if(f && f.revenue > 0 && r.sum > f.revenue) crit(12, `сумма сделки ${money(r.sum)} ₽ больше выручки за ${f.year} год (${money(f.revenue)} ₽)`);
     if(p.liquidated || (p.status && !/действующ/i.test(p.status))) crit(2, `статус в «Прозрачном бизнесе»: ${p.status || 'ликвидировано'}`);
   }
+  if(a.fs && (a.fs.terror.hits.length || a.fs.fromu.hits.length)) crit(3, `совпадение с перечнями Росфинмониторинга: ${[...a.fs.terror.hits, ...a.fs.fromu.hits].map(h=>`${h.who} — ${h.text}`).join('; ')}`);
+  if(a.sro && r.subj.sk && !a.sro.rows.some(x=>/член/i.test(x.status) && !/исключ|прекращ/i.test(x.status)))
+    crit(6, a.sro.n ? `в реестрах НОСТРОЙ и НОПРИЗ действующего членства нет: ${a.sro.rows.map(x=>`${x.registry} — ${x.status.toLowerCase()}`).join('; ')}` : 'в реестрах НОСТРОЙ и НОПРИЗ членство в СРО не найдено, а предмет договора его требует');
   if(a.bk && a.bk.n) crit(2, `в реестре должников ЕФРСБ: ${(a.bk.rows[0] && (a.bk.rows[0].procedure || a.bk.rows[0].status)) || 'есть запись'}`);
   if(a.egrul && a.egrul.ended) crit(2, `по ЕГРЮЛ деятельность прекращена ${a.egrul.ended}`);
   if((a.kad && a.kad.def.nYear > 0) || (a.enf && a.enf.open > 0))
@@ -1426,6 +1441,15 @@ function renderReq(){
 const AUTO_MARK = 'Автопроверка';
 const EXT_ZIP = 'https://github.com/mazurovmikhail-ui/komplaens-kontragent/archive/refs/heads/main.zip';
 let autoBusy = false, autoErr = '', fsspWait = false, extSeq = 0;
+let egrulPdf = '', egrulPdfInn = '';   /* выписка ЕГРЮЛ в PDF (base64) — только в памяти вкладки, в черновик не пишется */
+function downloadB64(name, b64, mime){
+  try{
+    const bin = atob(b64); const u = new Uint8Array(bin.length);
+    for(let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([u], {type:mime})); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 400);
+  }catch(e){ toast('Скачивание недоступно'); }
+}
 const extWait = {};
 function extVersion(){ return document.documentElement.getAttribute('data-kpk-ext') || ''; }
 function extTarget(){ return location.origin === 'null' ? '*' : location.origin; }
@@ -1463,6 +1487,7 @@ async function autoCheck(){
     const keepEnf = S.auto && S.auto.inn === inn ? S.auto.enf : null;
     const eg = d.egrul ? {name:str(d.egrul.name,200), full:str(d.egrul.full,300), ogrn:str(d.egrul.ogrn,15), kpp:str(d.egrul.kpp,9),
                           reg:str(d.egrul.reg,10), region:str(d.egrul.region,80), head:str(d.egrul.head,200), ended:str(d.egrul.ended,10)} : null;
+    if(d.egrul && typeof d.egrul.pdf === 'string' && d.egrul.pdf.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(d.egrul.pdf)){ egrulPdf = d.egrul.pdf; egrulPdfInn = inn; }
     if(eg){
       if(eg.name && (!S.cp || normName(S.cp) !== normName(eg.name))) S.cpDoc = S.cp, S.cp = shortForm(eg.name);
       if(eg.ogrn) S.ogrn = eg.ogrn;
@@ -1475,13 +1500,22 @@ async function autoCheck(){
         staff:d.pb.staff===null||d.pb.staff===undefined ? null : Number(d.pb.staff)||0, staffYear:Number(d.pb.staffYear)||0,
         taxes:Number(d.pb.taxes)||0, taxesYear:Number(d.pb.taxesYear)||0,
         fin:(d.pb.fin||[]).slice(0,3).map(x=>({year:Number(x.year)||0, revenue:Number(x.revenue)||0, expense:Number(x.expense)||0})),
-        arrears:Number(d.pb.arrears)||0, arrearsSum:Number(d.pb.arrearsSum)||0, offenses:Number(d.pb.offenses)||0} : null;
+        arrears:Number(d.pb.arrears)||0, arrearsSum:Number(d.pb.arrearsSum)||0, offenses:Number(d.pb.offenses)||0,
+        arrearsPeriod:str(d.pb.arrearsPeriod,8), arrearsEarlier:!!d.pb.arrearsEarlier,
+        arrearsBy:(d.pb.arrearsBy||[]).slice(0,10).map(x=>({name:str(x.name,120), sum:Number(x.sum)||0})),
+        heads:(d.pb.heads||[]).slice(0,5).map(x=>({name:str(x.name,120), inn:str(x.inn,12), cnt:Number(x.cnt)||0, position:str(x.position,80)})),
+        founders:(d.pb.founders||[]).slice(0,10).map(x=>({name:str(x.name,120), inn:str(x.inn,12), cnt:Number(x.cnt)||0})),
+        headInvalid:Number(d.pb.headInvalid)||0, founderInvalid:Number(d.pb.founderInvalid)||0} : null;
     const nn = v => (v===null || v===undefined) ? null : (Number(v)||0);
     const bo = d.bo ? {year:Number(d.bo.year)||0, filed:str(d.bo.filed,10), assets:nn(d.bo.assets), assetsPrev:nn(d.bo.assetsPrev), net:nn(d.bo.net), netPrev:nn(d.bo.netPrev),
-        receivables:nn(d.bo.receivables), payables:nn(d.bo.payables), loansShort:nn(d.bo.loansShort), loansLong:nn(d.bo.loansLong),
+        receivables:nn(d.bo.receivables), payables:nn(d.bo.payables), payablesPrev:nn(d.bo.payablesPrev), loansShort:nn(d.bo.loansShort), loansLong:nn(d.bo.loansLong),
         revenue:nn(d.bo.revenue), revenuePrev:nn(d.bo.revenuePrev), profit:nn(d.bo.profit), profitPrev:nn(d.bo.profitPrev)} : null;
-    S.auto = {at:d.at, inn, errors:d.errors||{}, enf:keepEnf||null, egrul:eg, pb, bo,
-      kad: d.kad ? {def:{n:Number(d.kad.def.n)||0, nYear:Number(d.kad.def.nYear)||0,
+    const hitList = h => (h && h.hits || []).slice(0,10).map(x=>({who:str(x.who,40), text:str(x.text,240)}));
+    const fs = d.fs ? {terror:{n:Number(d.fs.terror && d.fs.terror.n)||0, hits:hitList(d.fs.terror)}, fromu:{n:Number(d.fs.fromu && d.fs.fromu.n)||0, hits:hitList(d.fs.fromu)}} : null;
+    const sro = d.sro ? {n:Number(d.sro.n)||0, partial:str(d.sro.partial,200), rows:(d.sro.rows||[]).slice(0,10).map(x=>({registry:str(x.registry,10), member:str(x.member,200), status:str(x.status,60),
+        sro:str(x.sro,200), sroNum:str(x.sroNum,30), regNum:str(x.regNum,30), regDate:str(x.regDate,10), director:str(x.director,120)}))} : null;
+    S.auto = {at:d.at, inn, errors:d.errors||{}, enf:keepEnf||null, egrul:eg, pb, bo, fs, sro,
+      kad: d.kad ? {def:{n:Number(d.kad.def.n)||0, nYear:Number(d.kad.def.nYear)||0, nYearMore:!!d.kad.def.nYearMore,
                          rows:(d.kad.def.rows||[]).slice(0,15).map(x=>({num:str(x.num,60), url:safeUrl(x.url), date:str(x.date,20), court:str(x.court,160),
                                plaintiffs:(x.plaintiffs||[]).slice(0,4).map(n=>str(n,160))}))},
                     pl:{n:Number(d.kad.pl.n)||0}} : null,
@@ -1490,7 +1524,7 @@ async function autoCheck(){
     };
     autoNotes();
     const bad = Object.values(S.auto.errors).filter(Boolean);
-    if(bad.length) autoErr = bad.join('; '); else toast('Суды и банкротство проверены');
+    if(bad.length) autoErr = bad.join('; '); else toast('Автопроверка выполнена');
   }catch(e){ autoErr = String((e && e.message) || e); }
   autoBusy = false; render();
 }
@@ -1522,7 +1556,8 @@ function autoNotes(){
   };
   if(a.egrul){
     const e = a.egrul;
-    put(1, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — ЕГРЮЛ (egrul.nalog.ru). ${e.full||e.name}, ОГРН ${e.ogrn}${e.kpp?`, КПП ${e.kpp}`:''}, дата регистрации ${e.reg}${e.region?`, ${e.region}`:''}.${e.head?` ${nodot(e.head)}.`:''}${e.ended?` Деятельность прекращена ${e.ended}.`:' Записи о прекращении деятельности нет.'} ОКВЭД и размер уставного капитала — по выписке.`, false);
+    const p1 = a.pb;
+    put(1, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — ЕГРЮЛ (egrul.nalog.ru)${p1?' и «Прозрачный бизнес»':''}. ${e.full||e.name}, ОГРН ${e.ogrn}${e.kpp?`, КПП ${e.kpp}`:''}, дата регистрации ${e.reg}${e.region?`, ${e.region}`:''}.${e.head?` ${nodot(e.head)}.`:''} ${p1 ? `Основной ОКВЭД ${p1.okved} ${p1.okvedName}; уставный капитал ${money(p1.capital)} ₽.` : 'ОКВЭД и размер уставного капитала — по выписке.'}${e.ended?` Деятельность прекращена ${e.ended}.`:' Записи о прекращении деятельности нет.'} Смена руководителя, участников и наименования за последние 12 месяцев — по истории записей в выписке${egrulPdf && egrulPdfInn===a.inn ? ' (выписка скачана для досье)' : ''}.`, false);
   }
   if(a.pb){
     const p = a.pb, src = `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — «Прозрачный бизнес» (pb.nalog.ru).`;
@@ -1530,9 +1565,12 @@ function autoNotes(){
     const f = p.fin[0], r = calc();
     put(2, `${src} ${p.invalid ? 'Есть отметка о недостоверности сведений — подробности в выписке из ЕГРЮЛ.' : 'Отметок о недостоверности сведений нет.'}`, !p.invalid);
     put(3, `${src} Статус: ${p.status || 'не указан'}${p.liquidated ? '; организация ликвидирована' : ''}.`, !p.liquidated && /действующ/i.test(p.status));
-    put(6, `${src} Адрес: ${p.address || 'не указан'}; ${p.massAddr ? 'отнесён к адресам массовой регистрации' : 'к адресам массовой регистрации не отнесён'}. Дисквалификация руководителя и «массовость» руководителя и учредителей проверяются отдельно.`, false);
+    const orgs = n => `${n} организац${n===1?'ии':'иях'}`;
+    const heads = (p.heads||[]).map(h=>`${h.position?h.position.toLowerCase()+' ':''}${h.name} — руководитель в ${orgs(h.cnt)}`).join('; ');
+    const founders = (p.founders||[]).map(f=>`${f.name} — учредитель в ${orgs(f.cnt)}`).join('; ');
+    put(6, `${src} Адрес: ${p.address || 'не указан'}; ${p.massAddr ? 'отнесён к адресам массовой регистрации' : 'к адресам массовой регистрации не отнесён'}.${heads?` ${nodot(heads)}.`:''}${founders?` ${nodot(founders)}.`:''}${p.headInvalid?' Есть отметка о недостоверности сведений о руководителе.':''}${p.founderInvalid?' Есть отметка о недостоверности сведений об участниках.':''} Дисквалификация руководителя — по реестру дисквалифицированных лиц ФНС (service.nalog.ru/disqualified.do), проверяется по Ф.И.О. вручную.`, false);
     put(19, `${src} Специальные налоговые режимы: ${p.regimes.length ? p.regimes.map(x=>RGM[x]||x).join(', ') : 'не применяет — общая система, плательщик НДС'}.`, false);
-    put(20, `${src} Сведения о недоимке: ${p.arrears ? `записей — ${p.arrears}${p.arrearsSum?` на ${money(p.arrearsSum)} ₽`:''}` : 'нет'}. Задолженность, направленная на взыскание приставу: ${p.debtToBailiff ? 'есть' : 'нет'}. Налоговая отчётность более года: ${p.noReports ? 'не представляется' : 'представляется'}. Сальдо ЕНС сервис не показывает.`, false);
+    put(20, `${src} Сведения о недоимке${p.arrearsPeriod?` на ${p.arrearsPeriod}`:''}: ${p.arrears ? `${money(p.arrearsSum)} ₽ (${(p.arrearsBy||[]).map(x=>`${x.name.toLowerCase()} — ${money(x.sum)} ₽`).join('; ')})` : `нет${p.arrearsEarlier?', в предыдущие месяцы была':''}`}. Задолженность, направленная на взыскание приставу: ${p.debtToBailiff ? 'есть' : 'нет'}.${(()=>{ const t = Number(calc().org.taxDebt)||0; return p.arrears ? (t ? ` Порог по приказу организации — ${money(t)} ₽, недоимка его ${p.arrearsSum > t ? 'превышает' : 'не превышает'}.` : ' Порог налоговой задолженности по приказу организации в настройках не задан.') : ''; })()} Налоговая отчётность более года: ${p.noReports ? 'не представляется' : 'представляется'}. Сальдо ЕНС сервис не показывает.`, false);
     put(22, `${src} Среднесписочная численность${p.staffYear?` за ${p.staffYear} год`:''} — ${p.staff===null?'нет данных':p.staff}. Уплачено налогов и взносов${p.taxesYear?` за ${p.taxesYear} год`:''} — ${money(p.taxes)} ₽${f && f.revenue ? `; это ${(p.taxes/f.revenue*100).toFixed(2).replace('.',',')} % доходов за ${f.year} год` : ''}.`, false);
     if(p.fin.length) put(23, `${src} ${p.fin.map(x=>`${x.year} год: доходы ${money(x.revenue)} ₽, расходы ${money(x.expense)} ₽, разница ${money(x.revenue-x.expense)} ₽`).join('; ')}. Уставный капитал — ${money(p.capital)} ₽. Чистые активы, дебиторская и кредиторская задолженность — по ГИР БО.`, false);
     if(f && f.revenue && r.sum) put(24, `${src} Сумма сделки ${money(r.sum)} ₽ составляет ${(r.sum/f.revenue*100).toFixed(1).replace('.',',')} % доходов контрагента за ${f.year} год (${money(f.revenue)} ₽). Соотношение с активами — по ГИР БО.`, false);
@@ -1551,10 +1589,20 @@ function autoNotes(){
         : S.cl[24].note});
     }
   }
+  if(a.fs){
+    const f = a.fs, hasPersons = !!(a.egrul && a.egrul.head) || !!(a.pb && (a.pb.heads||[]).length);
+    const hits = [...f.terror.hits.map(h=>`перечень экстремистов и террористов, совпадение по ${h.who}: ${h.text}`), ...f.fromu.hits.map(h=>`перечень ФРОМУ, совпадение по ${h.who}: ${h.text}`)];
+    put(7, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — перечни Росфинмониторинга (fedsfm.ru): записей в перечне экстремистов и террористов — ${f.terror.n}, в перечне ФРОМУ — ${f.fromu.n}. Сверены ИНН, наименование${hasPersons?', Ф.И.О. руководителя и участников':''}. ${hits.length ? `Совпадения: ${nodot(hits.join('; '))}. Совпадение по Ф.И.О. требует сверки даты рождения.` : 'Совпадений нет.'} Санкционные перечни (позиция 8) сервис не охватывает.`, !hits.length);
+  }
+  if(a.sro){
+    const s = a.sro;
+    const rows = s.rows.map(x=>`${x.registry}: ${x.sro}${x.sroNum?` (${x.sroNum})`:''}, статус — ${x.status.toLowerCase()||'не указан'}, рег. № ${x.regNum||'—'}${x.regDate?` от ${rus(x.regDate)}`:''}`).join('; ');
+    put(16, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — единые реестры НОСТРОЙ и НОПРИЗ. ${s.n ? `Записей: ${s.n}. ${nodot(rows)}.` : 'Членство в СРО не найдено.'}${s.partial?` Часть реестров не ответила: ${s.partial}.`:''} Лицензии, допуски и специалисты в НРС — по документам контрагента и реестрам лицензий.`, false);
+  }
   if(a.kad){
     const k = a.kad;
     const last = k.def.rows.slice(0,5).map(x=>`${x.num} от ${x.date}${x.plaintiffs.length?`, истец ${x.plaintiffs.join(', ')}`:''}`).join('; ');
-    put(9, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — kad.arbitr.ru. Ответчик: дел — ${k.def.n}, из них за последние 12 месяцев — ${k.def.nYear}. Истец: дел — ${k.pl.n}.${last?` Последние дела, где контрагент ответчик: ${nodot(last)}.`:''} Суммы требований в списке картотеки не показываются — они в карточках дел. Суды общей юрисдикции не охвачены.`, k.def.n===0);
+    put(9, `${AUTO_MARK} ${stamp(a.at)}, ИНН ${a.inn}, источник — kad.arbitr.ru. Ответчик: дел — ${k.def.n}, из них за последние 12 месяцев — ${k.def.nYearMore?'не менее ':''}${k.def.nYear}. Истец: дел — ${k.pl.n}.${last?` Последние дела, где контрагент ответчик: ${nodot(last)}.`:''} Суммы требований в списке картотеки не показываются — они в карточках дел. Суды общей юрисдикции не охвачены.`, k.def.n===0);
   }
   if(a.bk){
     const rows = a.bk.rows.map(x=>`${x.status||'статус не указан'}${x.caseNum?`, дело ${x.caseNum}`:''}${x.procedure?`, ${x.procedure.toLowerCase()} с ${rus(x.procedureDate)}`:''}${x.manager?`, арбитражный управляющий ${x.manager}`:''}`).join('; ');
@@ -1578,8 +1626,11 @@ function autoReportHtml(){
 ${a.egrul?`<p><b>ЕГРЮЛ (egrul.nalog.ru).</b> ${esc(a.egrul.full||a.egrul.name)}, ОГРН ${esc(a.egrul.ogrn)}, дата регистрации ${esc(a.egrul.reg)}${a.egrul.head?`. ${esc(nodot(a.egrul.head))}`:''}${a.egrul.ended?`. Деятельность прекращена ${esc(a.egrul.ended)}`:''}.</p>`:''}
 ${a.pb?`<p><b>«Прозрачный бизнес» (pb.nalog.ru).</b> Статус: ${esc(a.pb.status)}. Недостоверность сведений: ${a.pb.invalid?'есть':'нет'}. Адрес массовой регистрации: ${a.pb.massAddr?'да':'нет'}. ОКВЭД ${esc(a.pb.okved)} ${esc(a.pb.okvedName)}. Уставный капитал ${money(a.pb.capital)} ₽. Среднесписочная численность: ${a.pb.staff===null?'нет данных':a.pb.staff}. Уплачено налогов: ${money(a.pb.taxes)} ₽. Сведения о недоимке: ${a.pb.arrears?'есть':'нет'}; задолженность у приставов: ${a.pb.debtToBailiff?'есть':'нет'}.</p>
 ${tbl(['Год','Доходы, ₽','Расходы, ₽'], a.pb.fin.map(x=>[x.year, money(x.revenue), money(x.expense)]))}`:''}
+${a.pb && ((a.pb.heads||[]).length||(a.pb.founders||[]).length)?`<p><b>Руководитель и участники («Прозрачный бизнес»).</b> ${esc((a.pb.heads||[]).map(h=>`${h.position?h.position.toLowerCase()+' ':''}${h.name} — руководитель в ${h.cnt} орг.`).concat((a.pb.founders||[]).map(f=>`${f.name} — учредитель в ${f.cnt} орг.`)).join('; '))}.</p>`:''}
+${a.fs?`<p><b>Перечни Росфинмониторинга (fedsfm.ru).</b> Записей: ${a.fs.terror.n} и ${a.fs.fromu.n}. ${a.fs.terror.hits.length||a.fs.fromu.hits.length?`Совпадения: ${esc([...a.fs.terror.hits, ...a.fs.fromu.hits].map(h=>`${h.who} — ${h.text}`).join('; '))}.`:'Совпадений по ИНН, наименованию и Ф.И.О. нет.'}</p>`:''}
+${a.sro?`<p><b>Реестры СРО (НОСТРОЙ, НОПРИЗ).</b> ${a.sro.n?esc(a.sro.rows.map(x=>`${x.registry}: ${x.sro}, ${x.status.toLowerCase()}, рег. № ${x.regNum} от ${rus(x.regDate)}`).join('; ')):'членство не найдено'}.</p>`:''}
 ${a.bo?`<p><b>Бухгалтерская отчётность за ${a.bo.year} год (bo.nalog.gov.ru).</b> Выручка ${a.bo.revenue===null?'—':money(a.bo.revenue)+' ₽'}, чистая прибыль ${a.bo.profit===null?'—':money(a.bo.profit)+' ₽'}, активы ${a.bo.assets===null?'—':money(a.bo.assets)+' ₽'}, капитал и резервы ${a.bo.net===null?'—':money(a.bo.net)+' ₽'}, дебиторская задолженность ${a.bo.receivables===null?'—':money(a.bo.receivables)+' ₽'}, кредиторская ${a.bo.payables===null?'—':money(a.bo.payables)+' ₽'}.</p>`:''}
-${a.kad?`<p><b>Арбитражные дела (kad.arbitr.ru).</b> Ответчик: ${a.kad.def.n}, из них за последние 12 месяцев — ${a.kad.def.nYear}. Истец: ${a.kad.pl.n}.</p>
+${a.kad?`<p><b>Арбитражные дела (kad.arbitr.ru).</b> Ответчик: ${a.kad.def.n}, из них за последние 12 месяцев — ${a.kad.def.nYearMore?'не менее ':''}${a.kad.def.nYear}. Истец: ${a.kad.pl.n}.</p>
 ${tbl(['Дело','Дата','Суд','Истец'], a.kad.def.rows.map(x=>[x.num, x.date, x.court, x.plaintiffs.join(', ')]))}`:'<p><b>Арбитражные дела.</b> Не проверялись.</p>'}
 ${a.bk?`<p><b>ЕФРСБ (bankrot.fedresurs.ru).</b> Записей в реестре должников: ${a.bk.n}.</p>
 ${tbl(['Должник','Статус','Дело','Процедура','Арбитражный управляющий'], a.bk.rows.map(x=>[x.name, x.status, x.caseNum, `${x.procedure} ${rus(x.procedureDate)}`, x.manager]))}`:'<p><b>ЕФРСБ.</b> Не проверялся.</p>'}
@@ -1603,32 +1654,45 @@ function autoCard(){
       <button class="btn ghost" data-view="orgs">Как поставить расширение</button>
     </div>`;
   } else if(autoBusy){
-    body = `<p class="muted" style="margin:0">Открываю ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, картотеку арбитражных дел и ЕФРСБ в фоновых вкладках, это занимает около 40 секунд. Вкладки закроются сами.</p>`;
+    body = `<p class="muted" style="margin:0">Открываю ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, картотеку арбитражных дел и ЕФРСБ в фоновых вкладках, параллельно сверяю перечни Росфинмониторинга и реестры СРО — около минуты. Вкладки закроются сами.</p>`;
   } else {
     body = `${autoErr?`<div class="verdict v-neg"><b>Часть проверки не прошла</b>${esc(autoErr)}</div>`:''}
     ${a ? `<div class="scroll"><table class="t"><tbody>
       ${a.egrul?`<tr><th style="width:34%">ЕГРЮЛ</th><td>${esc(a.egrul.name)}, ОГРН ${esc(a.egrul.ogrn)}, зарегистрировано ${esc(a.egrul.reg)}${a.egrul.ended?` · <b>деятельность прекращена ${esc(a.egrul.ended)}</b>`:''}</td></tr>`:''}
       ${a.pb?`<tr><th style="width:34%">«Прозрачный бизнес»</th><td>${esc(a.pb.status||'статус не указан')}${a.pb.invalid?' · <b>недостоверность сведений</b>':''}${a.pb.massAddr?' · <b>массовый адрес</b>':''}${a.pb.arrears||a.pb.debtToBailiff?' · <b>налоговая задолженность</b>':''}<br><span class="muted">ОКВЭД ${esc(a.pb.okved)} ${esc(a.pb.okvedName)}</span><br>численность — ${a.pb.staff===null?'нет данных':a.pb.staff}, налогов уплачено — ${money(a.pb.taxes)} ₽${a.pb.fin[0]?`, доходы за ${a.pb.fin[0].year} — ${money(a.pb.fin[0].revenue)} ₽, расходы — ${money(a.pb.fin[0].expense)} ₽`:''}</td></tr>`:''}
+      ${a.pb && ((a.pb.heads||[]).length || (a.pb.founders||[]).length)?`<tr><th style="width:34%">Руководитель и участники</th><td>${(a.pb.heads||[]).map(h=>`${esc(h.name)} — руководитель в ${h.cnt} орг.${h.cnt>10?' <b>(массовый)</b>':''}`).concat((a.pb.founders||[]).map(f=>`${esc(f.name)} — учредитель в ${f.cnt} орг.${f.cnt>10?' <b>(массовый)</b>':''}`)).join('<br>')}</td></tr>`:''}
+      ${a.fs?`<tr><th style="width:34%">Росфинмониторинг</th><td>${a.fs.terror.hits.length||a.fs.fromu.hits.length?`<b>есть совпадения: ${a.fs.terror.hits.length+a.fs.fromu.hits.length}</b>`:'совпадений с перечнями нет'} <span class="muted">· записей: ${a.fs.terror.n} и ${a.fs.fromu.n}</span></td></tr>`:''}
+      ${a.sro?`<tr><th style="width:34%">СРО (НОСТРОЙ, НОПРИЗ)</th><td>${a.sro.n?a.sro.rows.map(x=>`${esc(x.registry)}: ${esc(x.sro)} — ${esc(x.status.toLowerCase())}`).join('<br>'):'членство не найдено'}${a.sro.partial?`<br><span class="muted">не ответил: ${esc(a.sro.partial)}</span>`:''}</td></tr>`:''}
       ${a.bo?`<tr><th style="width:34%">Отчётность за ${a.bo.year} год (ГИР БО)</th><td>выручка — ${a.bo.revenue===null?'нет данных':money(a.bo.revenue)+' ₽'}, чистая прибыль — ${a.bo.profit===null?'нет данных':money(a.bo.profit)+' ₽'}<br>активы — ${a.bo.assets===null?'нет данных':money(a.bo.assets)+' ₽'}, капитал и резервы — ${a.bo.net===null?'нет данных':(a.bo.net<0?'<b>':'')+money(a.bo.net)+' ₽'+(a.bo.net<0?'</b>':'')}</td></tr>`:''}
-      <tr><th style="width:34%">Арбитражные дела, ответчик</th><td>${a.kad?`<b>${a.kad.def.n}</b>, из них за последние 12 месяцев — <b>${a.kad.def.nYear}</b>`:'<span class="muted">нет данных</span>'}</td></tr>
+      <tr><th style="width:34%">Арбитражные дела, ответчик</th><td>${a.kad?`<b>${a.kad.def.n}</b>, из них за последние 12 месяцев — <b>${a.kad.def.nYearMore?'не менее ':''}${a.kad.def.nYear}</b>`:'<span class="muted">нет данных</span>'}</td></tr>
       <tr><th>Арбитражные дела, истец</th><td>${a.kad?a.kad.pl.n:'<span class="muted">нет данных</span>'}</td></tr>
       <tr><th>Банкротство (ЕФРСБ)</th><td>${a.bk?(a.bk.n?`<b>найдено записей: ${a.bk.n}</b>`:'в реестре должников не значится'):'<span class="muted">нет данных</span>'}</td></tr>
       <tr><th>Исполнительные производства</th><td>${a.enf?(a.enf.n?`<b>${a.enf.n}</b>${a.enf.more?' на первой странице':''}, не окончено — <b>${a.enf.open}</b> на ${money(a.enf.debt)} ₽`:'по ИНН ничего не найдено'):'<span class="muted">не проверялись — нужна капча, см. кнопку ниже</span>'}</td></tr>
     </tbody></table></div>
+    ${a.fs && (a.fs.terror.hits.length||a.fs.fromu.hits.length)?`<h3 style="margin-top:12px">Совпадения с перечнями Росфинмониторинга</h3><ul class="tight">${[...a.fs.terror.hits.map(h=>({...h,l:'экстремисты и террористы'})), ...a.fs.fromu.hits.map(h=>({...h,l:'ФРОМУ'}))].map(h=>`<li><b>${esc(h.l)}</b>, по ${esc(h.who)}: ${esc(h.text)}</li>`).join('')}</ul><div class="hint">Совпадение по Ф.И.О. — повод сверить дату рождения, а не вывод.</div>`:''}
     ${a.bk && a.bk.rows.length?`<h3 style="margin-top:12px">Реестр должников</h3><ul class="tight">${a.bk.rows.map(x=>`<li>${esc(x.status)}${x.caseNum?`, дело ${esc(x.caseNum)}`:''}${x.procedure?` — ${esc(x.procedure.toLowerCase())} с ${rus(x.procedureDate)}`:''}</li>`).join('')}</ul>`:''}
     ${a.kad && a.kad.def.rows.length?`<h3 style="margin-top:12px">Последние дела, где контрагент ответчик</h3><ul class="tight">${a.kad.def.rows.map(x=>`<li>${link(x.url,x.num)} от ${esc(x.date)}${x.plaintiffs.length?` — истец ${esc(x.plaintiffs.join(', '))}`:''}<span class="muted"> · ${esc(x.court)}</span></li>`).join('')}</ul>`:''}
     ${a.enf && a.enf.rows.length?`<h3 style="margin-top:12px">Исполнительные производства</h3><ul class="tight">${a.enf.rows.slice(0,10).map(x=>`<li>${esc(x.ip)}: ${esc(x.subject)}${x.ended?` <span class="muted">· окончено: ${esc(x.ended)}</span>`:''}</li>`).join('')}</ul>`:''}
-    <div class="hint">Проверено ${esc(stamp(a.at))}. Итоги внесены в позиции чек-листа, которые входят в уровень: 1–3, 6, 9–11, 19, 20, 22–24. Где источник закрывает позицию целиком и ничего не найдено, стоит «соответствует»; остальное квалифицируете вы.</div>`
+    <h3 style="margin-top:12px">Вручную — сервисы с кодом с картинки или без доступа</h3>
+    <div class="btnrow" style="margin:0">
+      <a class="btn" href="https://fedresurs.ru/search/entity?code=${encodeURIComponent(inn)}" target="_blank" rel="noopener noreferrer">Федресурс, существенные факты — поз. 12 ↗</a>
+      <a class="btn" href="https://zakupki.gov.ru/epz/dishonestsupplier/search/results.html?searchString=${encodeURIComponent(inn)}&morphology=on&pageNumber=1&recordsPerPage=_10" target="_blank" rel="noopener noreferrer">Реестр недобросовестных поставщиков — поз. 13 ↗</a>
+      <a class="btn" href="https://www.reestr-zalogov.ru/search/index" target="_blank" rel="noopener noreferrer">Реестр залогов — поз. 14 ↗</a>
+      <a class="btn" href="https://service.nalog.ru/bi.do" target="_blank" rel="noopener noreferrer">Блокировки счетов — поз. 21 ↗</a>
+      <a class="btn" href="https://service.nalog.ru/disqualified.do" target="_blank" rel="noopener noreferrer">Дисквалифицированные лица — поз. 6 ↗</a>
+    </div>
+    <div class="hint">Проверено ${esc(stamp(a.at))}. Итоги внесены в позиции чек-листа, которые входят в уровень: 1–3, 6, 7, 9–11, 16, 19, 20, 22–24. Где источник закрывает позицию целиком и ничего не найдено, стоит «соответствует»; остальное квалифицируете вы.</div>`
     : `<p class="muted" style="margin:0 0 4px">По ИНН контрагента расширение соберёт арбитражные дела и сведения о банкротстве и разложит их по позициям 9 и 11. Приставы проверяются отдельной кнопкой: там нужно ввести код с картинки.</p>`}
     ${fsspWait?`<div class="verdict v-cond" style="margin-top:10px"><b>Жду результат с сайта ФССП</b>В открывшейся вкладке нажмите «Найти» и введите код с картинки. Результат вернётся сюда сам.</div>`:''}
     <div class="btnrow">
       <button class="btn primary" data-act="auto-run">${a && (a.kad||a.bk)?'Проверить суды и банкротство заново':'Проверить суды и банкротство'}</button>
       <button class="btn" data-act="fssp-run">Проверить приставов (ФССП)</button>
       ${a?`<button class="btn" data-act="auto-doc">Скачать справку для досье</button>`:''}
+      ${egrulPdf && egrulPdfInn===inn?`<button class="btn" data-act="egrul-pdf">Скачать выписку ЕГРЮЛ (PDF)</button>`:''}
     </div>`;
   }
   return `<div class="card">
-    <div class="hd"><h2>Суды, банкротство, приставы</h2><span class="ref">ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, суды, ЕФРСБ, ФССП · через расширение${extVersion()?` ${esc(extVersion())}`:''}</span></div>
+    <div class="hd"><h2>Суды, банкротство, приставы</h2><span class="ref">ЕГРЮЛ, «Прозрачный бизнес», ГИР БО, Росфинмониторинг, СРО, суды, ЕФРСБ, ФССП · через расширение${extVersion()?` ${esc(extVersion())}`:''}</span></div>
     ${body}
   </div>`;
 }
@@ -1937,6 +2001,7 @@ function renderOrgs(){
         <td><input type="number" data-org="${o.id}" data-k="porog" value="${o.porog}" style="width:110px">${o.porog>300000?'<div class="need">свыше 300 000 ₽ — нужно письменное согласование управляющего партнёра</div>':''}</td>
         <td><input type="number" data-org="${o.id}" data-k="base" value="${o.base}" style="width:120px"></td>
         <td><input type="number" data-org="${o.id}" data-k="std" value="${o.std}" style="width:130px">${o.std<o.base?'<div class="need">граница стандартного уровня ниже базовой</div>':''}</td>
+        <td><input type="number" data-org="${o.id}" data-k="taxDebt" value="${o.taxDebt||''}" style="width:120px" placeholder="не задан"></td>
         <td><input type="text" data-org="${o.id}" data-k="prikaz" value="${esc(o.prikaz)}" placeholder="№ и дата" style="width:140px"></td>
         <td><button class="btn ghost danger" style="padding:2px 8px;font-size:12px" data-orgdel="${o.id}">×</button></td>
       </tr>`).join('');
@@ -1945,9 +2010,10 @@ function renderOrgs(){
   <div class="card" style="margin-top:18px">
     <div class="hd"><h2>Пороговые значения по организациям Группы</h2><span class="ref">Приложение № 2, пп. 4.1–4.3</span></div>
     <p class="small muted" style="margin-top:0">Значения устанавливаются приказом руководителя каждой организации (п. 4.2), копия приказа направляется комплаенс-менеджеру в течение 3 рабочих дней. Порог проверки не может превышать 300 000 ₽ без письменного согласования управляющего партнёра. Пересмотр — не реже одного раза в год.</p>
+    <p class="small muted">«Налоговая задолженность до» — порог по п. 11 Приложения № 6: недоимка выше него предлагается как критический фактор. Устанавливается тем же приказом.</p>
     <p class="small muted">Справочник хранится в этом браузере и никуда не отправляется. Чтобы перенести его на другой компьютер, выгрузите JSON и загрузите его там.</p>
     ${ORGS.length?`<div class="scroll"><table class="t">
-      <thead><tr><th>№</th><th>Организация</th><th>ИНН</th><th>Роль в Группе</th><th>Порог, ₽</th><th>Базовый до, ₽</th><th>Стандартный до, ₽</th><th>Приказ</th><th></th></tr></thead>
+      <thead><tr><th>№</th><th>Организация</th><th>ИНН</th><th>Роль в Группе</th><th>Порог, ₽</th><th>Базовый до, ₽</th><th>Стандартный до, ₽</th><th>Налоговая задолженность до, ₽</th><th>Приказ</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`:`<p class="muted">Справочник пуст. Добавьте организацию или загрузите ранее выгруженный JSON.</p>`}
     <div class="btnrow">
@@ -2022,12 +2088,30 @@ function renderHelp(){
       <li>Обязательность привлечения профильных подразделений (п. 6.4) и налоговой оговорки (п. 12.5).</li>
       <li>Вывод по п. 7.9 и необходимость решения по п. 8.3, включая согласование управляющего партнёра.</li>
     </ul>
+    <h3>Откуда что берётся</h3>
+    <div class="scroll"><table class="t">
+      <thead><tr><th>Источник</th><th>Позиции чек-листа (Приложение № 5)</th><th>Приложение № 6</th><th>Как</th></tr></thead>
+      <tbody>
+        <tr><td>ЕГРЮЛ, egrul.nalog.ru</td><td>1, 2, 3</td><td>стоп-факторы 1, 2; флаг 1</td><td>само, плюс выписка в PDF для досье; смена руководителя за 12 месяцев (флаг 5) — по выписке</td></tr>
+        <tr><td>«Прозрачный бизнес», pb.nalog.ru</td><td>6, 19, 20, 22, 23, 24</td><td>стоп-факторы 4, 11; флаги 2, 3, 4, 6, 7</td><td>само; дисквалификация руководителя — вручную по Ф.И.О.; порог для п. 11 задаётся в настройках</td></tr>
+        <tr><td>Росфинмониторинг, fedsfm.ru</td><td>7</td><td>стоп-фактор 3</td><td>само: ИНН, наименование, Ф.И.О. руководителя и участников по обоим перечням; санкционные перечни (поз. 8) — вручную</td></tr>
+        <tr><td>Картотека арбитражных дел</td><td>9</td><td>флаг 8</td><td>само; суды общей юрисдикции — вручную</td></tr>
+        <tr><td>ФССП, fssp.gov.ru</td><td>10</td><td>флаг 8</td><td>полуавтомат: код с картинки вводит человек</td></tr>
+        <tr><td>ЕФРСБ, bankrot.fedresurs.ru</td><td>11</td><td>стоп-фактор 2</td><td>само</td></tr>
+        <tr><td>Федресурс, fedresurs.ru</td><td>12</td><td>—</td><td>вручную: сайт закрывает выдачу сообщений для автоматических запросов</td></tr>
+        <tr><td>ЕИС закупок, zakupki.gov.ru</td><td>13</td><td>стоп-фактор 5</td><td>вручную по ссылке с подставленным ИНН</td></tr>
+        <tr><td>Реестр залогов</td><td>14</td><td>—</td><td>вручную: код с картинки</td></tr>
+        <tr><td>НОСТРОЙ, НОПРИЗ</td><td>16</td><td>стоп-фактор 6</td><td>само: членство и статус; лицензии и НРС — вручную</td></tr>
+        <tr><td>ФНС, блокировки счетов</td><td>21</td><td>стоп-фактор 10</td><td>вручную: нужен БИК банка и код с картинки</td></tr>
+        <tr><td>ГИР БО, bo.nalog.gov.ru</td><td>23, 24</td><td>стоп-фактор 12; флаг 7</td><td>само</td></tr>
+      </tbody>
+    </table></div>
     <h3>Чего приложение не делает</h3>
     <ul class="tight">
-      <li>Не ходит само в ЕГРЮЛ, «Прозрачный бизнес», ГИР БО и остальные реестры, кроме трёх перечисленных выше, — даёт ссылки, а результат вносит комплаенс-менеджер. Выгрузки и снимки экрана приобщаются к досье отдельно (п. 7.3).</li>
+      <li>Не ходит в реестры, закрытые кодом с картинки или для автоматических запросов (Федресурс, РНП, залоги, блокировки счетов, дисквалифицированные лица), — даёт ссылки с подставленным ИНН, а результат вносит комплаенс-менеджер. Выгрузки и снимки экрана приобщаются к досье отдельно (п. 7.3).</li>
       <li>Не квалифицирует находки автопроверки. «Соответствует» ставится само только там, где не найдено ничего; дела, производства и записи о банкротстве оцениваете вы. Суды общей юрисдикции автопроверка не охватывает, суммы требований по арбитражным делам картотека в списке не показывает.</li>
       <li>Не заменяет мотивировку. Там, где Регламент требует фактических показателей и обоснования, поле обязательно к заполнению.</li>
-      <li>Не хранит данные на сервере: пороги, перечень исключений, реестр и черновик лежат в localStorage этого браузера. Сделка от инициатора едет внутри ссылки или файлом. При автопроверке ИНН контрагента уходит только на сами сайты-источники: kad.arbitr.ru, bankrot.fedresurs.ru и fssp.gov.ru.</li>
+      <li>Не хранит данные на сервере: пороги, перечень исключений, реестр и черновик лежат в localStorage этого браузера. Сделка от инициатора едет внутри ссылки или файлом. При автопроверке ИНН контрагента уходит только на сами сайты-источники: egrul.nalog.ru, pb.nalog.ru, bo.nalog.gov.ru, kad.arbitr.ru, bankrot.fedresurs.ru, reestr.nostroy.ru, reestr.nopriz.ru и fssp.gov.ru; перечни Росфинмониторинга скачиваются целиком и сверяются на вашем компьютере.</li>
       <li>Не содержит пороговых значений: они устанавливаются приказами руководителей организаций и вносятся на вкладке «Настройки».</li>
     </ul>
     <h3>Понижение уровня</h3>
@@ -2195,6 +2279,7 @@ document.addEventListener('click', e=>{
   if(a==='init-link'){ copy(baseUrl()+'#init='+pack({orgs:ORGS, excl:EXCL})); return; }
   if(a==='ex-add'){ EXCL.push({inn:'', name:'', kind:'mono'}); save(LS.excl,EXCL); render(); return; }
   if(a==='auto-run'){ autoCheck(); return; }
+  if(a==='egrul-pdf'){ downloadB64(`Выписка-ЕГРЮЛ_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${today()}.pdf`, egrulPdf, 'application/pdf'); return; }
   if(a==='fssp-run'){ fsspOpen(); return; }
   if(a==='auto-doc'){ download(`Автопроверка_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${today()}.doc`, autoReportHtml(), 'application/msword'); return; }
   if(a==='rq-add'){ S.req.extra.push({t:''}); render(); const ta = document.querySelector(`[data-rqx="${S.req.extra.length-1}"]`); if(ta) ta.focus(); return; }
@@ -2214,6 +2299,7 @@ document.addEventListener('click', e=>{
     if(!r.skip) files.push([`3_Запрос-документов_${nm}_${S.date}.doc`, reqDocHtml()]);
     files.push([`4_Данные-проверки_${nm}_${S.date}.json`, JSON.stringify(S,null,2)]);
     files.forEach((f,i)=>setTimeout(()=>download(f[0], f[1], f[0].endsWith('.json')?'application/json':'application/msword'), i*450));
+    if(egrulPdf && egrulPdfInn === digits(S.inn)){ files.push(['выписка']); setTimeout(()=>downloadB64(`0_Выписка-ЕГРЮЛ_${nm}_${S.date}.pdf`, egrulPdf, 'application/pdf'), files.length*450); }
     toast(`Файлов в досье: ${files.length}. Если браузер спросит про несколько загрузок — разрешите`);
     return;
   }
@@ -2255,7 +2341,7 @@ document.addEventListener('click', e=>{
   }
   if(a==='org-add'){
     const id = ORGS.reduce((m,o)=>Math.max(m,o.id),0) + 1;
-    ORGS.push({id, name:'', inn:'', role:'', porog:0, base:0, std:0, prikaz:''});
+    ORGS.push({id, name:'', inn:'', role:'', porog:0, base:0, std:0, taxDebt:0, prikaz:''});
     if(!ORGS.find(o=>o.id==S.org)) S.org = id;
     save(LS.orgs,ORGS); render(); return;
   }
@@ -2273,7 +2359,7 @@ document.addEventListener('click', e=>{
       if(raw && Array.isArray(raw.excl)){ EXCL = cleanExcl(raw.excl); save(LS.excl,EXCL); }
       ORGS = d.map((o,i)=>({
         id: Number(o.id)||i+1, name:String(o.name||''), inn:String(o.inn||''), role:String(o.role||''),
-        porog:Number(o.porog)||0, base:Number(o.base)||0, std:Number(o.std)||0, prikaz:String(o.prikaz||''),
+        porog:Number(o.porog)||0, base:Number(o.base)||0, std:Number(o.std)||0, taxDebt:Number(o.taxDebt)||0, prikaz:String(o.prikaz||''),
       }));
       if(!ORGS.find(o=>o.id==S.org)) S.org = ORGS.length ? ORGS[0].id : 0;
       save(LS.orgs,ORGS); render(); toast(`Загружено организаций: ${ORGS.length}`);
@@ -2285,7 +2371,7 @@ document.addEventListener('click', e=>{
 /* ====================== приём сделки и настроек по ссылке ====================== */
 function cleanOrgs(d){
   return d.map((o,i)=>({ id:Number(o.id)||i+1, name:String(o.name||''), inn:String(o.inn||''), role:String(o.role||''),
-    porog:Number(o.porog)||0, base:Number(o.base)||0, std:Number(o.std)||0, prikaz:String(o.prikaz||'') }));
+    porog:Number(o.porog)||0, base:Number(o.base)||0, std:Number(o.std)||0, taxDebt:Number(o.taxDebt)||0, prikaz:String(o.prikaz||'') }));
 }
 function cleanExcl(d){
   return d.map(x=>({ inn:String(x.inn||''), name:String(x.name||''), kind:EXCL_NAME[x.kind]?x.kind:'mono' }));
