@@ -914,12 +914,22 @@ function parseContract(raw){
   const names = [];
   /* кавычки бывают вложенными («АК «Трансаэро», "Компания "Ромашка"), поэтому название берётся
      до закрывающей кавычки, после которой идёт запятая, скобка, «именуемое», «в лице» или реквизит */
-  const reOrg = new RegExp(ORG_FORM + '\\s*[«"“„][^\\n]{2,140}?[»"”](?=\\s*(?:[,(;]|именуем|в\\s+лице|ИНН|КПП|ОГРН|адрес|$|\\n))', 'gi');
+  const reOrg = new RegExp(ORG_FORM + '(?:\\s+[А-ЯЁ][А-ЯЁа-яё-]+){0,4}\\s*[«"“„][^\\n]{2,140}?[»"”](?=\\s*(?:[,(;.]|именуем|в\\s+лице|ИНН|КПП|ОГРН|адрес|$|\\n))', 'gi');
   const reIp = /Индивидуальный\s+предприниматель\s+[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+)?/g;
+  /* физическое лицо: «гражданин РФ Иванов Иван Иванович» либо Ф.И.О., за которым идут паспорт, дата рождения, ИНН или «именуемый» */
+  const rePerson = /(?:гражданин(?:ка)?\s+(?:РФ|Российской\s+Федерации)?\s*,?\s*)?([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+(?:\s+(?:оглы|кызы|улы))?)(?=\s*,?\s*(?:\d{2}\.\d{2}\.\d{4}|паспорт|дата\s+рождения|\d{2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|ИНН|СНИЛС|именуем|зарегистрирован|пол\b))/g;
   [reOrg, reIp].forEach(re=>{ let m; while((m = re.exec(text))) names.push({t:shortForm(m[0]), at:m.index, end:m.index + m[0].length}); });
+  { let m; while((m = rePerson.exec(text))){ const t = m[1].replace(/\s+/g,' '); const at = m.index + m[0].indexOf(m[1]);
+      /* Ф.И.О. внутри уже найденного «Индивидуальный предприниматель …» второй раз не берётся */
+      if(!/^(Общество|Публичное|Акционерное|Закрытое|Открытое|Российская)/.test(t) && !names.some(n=>n.at <= at && at < n.end)) names.push({t, at, end:m.index + m[0].length, person:true}); } }
   names.sort((a,b)=>a.at-b.at);
   /* роль стороны — «именуемое в дальнейшем «Подрядчик»» сразу после наименования */
-  names.forEach(n=>{ const m = text.slice(n.end, n.end + 160).match(/именуем\S*(?:\s+в\s+дальнейшем)?\s*[«"“]?\s*([А-ЯЁа-яё-]{4,})/i); if(m) n.role = m[1].replace(/^./, c=>c.toUpperCase()); });
+  names.forEach((n, i)=>{
+    /* роль ищется только до следующего упоминания стороны, иначе роль второй стороны достаётся первой */
+    const stop = Math.min(n.end + 160, names[i+1] ? names[i+1].at : Infinity);
+    const m = text.slice(n.end, stop).match(/именуем\S*(?:\s+в\s+дальнейшем)?\s*[«"“]?\s*([А-ЯЁа-яё-]{4,})/i);
+    if(m) n.role = m[1].replace(/^./, c=>c.toUpperCase());
+  });
   const uniqNames = []; names.forEach(n=>{ const u = uniqNames.find(x=>normName(x.t)===normName(n.t)); if(!u) uniqNames.push(Object.assign({}, n)); else if(!u.role && n.role) u.role = n.role; });
   const roleOf = t => (uniqNames.find(x=>normName(x.t)===normName(t))||{}).role || '';
 
@@ -948,9 +958,12 @@ function parseContract(raw){
   r.parties.forEach(p=>{ if(!p.name){ const n = uniqNames.find(x=>!taken.has(normName(x.t)) && !ORGS.find(o=>normName(o.name)===normName(x.t))); if(n){ p.name = n.t; taken.add(normName(n.t)); } } });
   if(!r.parties.length) uniqNames.filter(n=>!ORGS.find(o=>normName(o.name)===normName(n.t))).slice(0,2).forEach(n=>r.parties.push({inn:'', ogrn:'', name:n.t, mine:null}));
   r.parties.forEach(p=>{ p.role = roleOf(p.name); if(!p.mine && p.name && ORGS.find(o=>normName(o.name)===normName(p.name))) p.mine = ORGS.find(o=>normName(o.name)===normName(p.name)); });
+  /* банк, упомянутый в договоре (эскроу, расчёты, гарантия), стороной не является — если без него остаются двое */
+  const banks = r.parties.filter(p=>/банк/i.test(p.name||'') && !/^(заёмщик|заемщик|кредитор|гарант|банк)$/i.test(p.role||'') && !p.mine);
+  if(banks.length && r.parties.length - banks.length >= 2){ r.bankNote = banks.map(b=>b.name).join(', '); r.parties = r.parties.filter(p=>!banks.includes(p)); }
 
   /* номер и дата */
-  let m = head.match(/ДОГОВОР[^\n№]{0,80}№\s*([^\s,;]+)/i); if(m) r.num = m[1].replace(/[_]+/g,'').slice(0,40);
+  let m = head.match(/ДОГОВОР[^№]{0,120}№\s*([^\s,;]+)/i); if(m) r.num = m[1].replace(/[_]+/g,'').slice(0,40);
   /* дата договора — в шапке, не раньше 2010 года: иначе первой попадается дата рождения или выдачи паспорта из преамбулы */
   const yNow = new Date().getFullYear();
   const dates = [...head.slice(0, 1500).matchAll(/[«"]?(\d{1,2})[»"]?\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})|(\d{2})\.(\d{2})\.(\d{4})/gi)];
@@ -970,7 +983,8 @@ function parseContract(raw){
   /* предмет */
   const zone = (head + ' ' + (text.match(/предмет\s+договора[\s\S]{0,900}/i)||[''])[0]).toLowerCase();
   const has = re => re.test(zone);
-  r.subj = has(/техническ\S+\s+заказчик/) ? 'tehzak'
+  r.subj = has(/долевого\s+участия|участи[яе]\s+в\s+долевом\s+строительстве|долевом\s+строительстве/) ? 'nedvizh'
+    : has(/техническ\S+\s+заказчик/) ? 'tehzak'
     : has(/проектн|изыскат|проектно-сметн/) ? 'proekt'
     : has(/подряд|строительно-монтаж|\bсмр\b|выполнени\S+\s+работ/) ? 'podryad'
     : has(/займ|заём|кредит|залог|поручительств|уступк/) ? 'zaim'
@@ -1026,7 +1040,7 @@ async function loadContract(file){
     else {
       /* организации Группы в договоре не узнаны — выбираем по роли: контрагент обычно подрядчик,
          поставщик, исполнитель, а не заказчик или покупатель; если по ролям не ясно — спрашиваем */
-      const cpRole = /^(суб|ген)?подрядчик|поставщик|исполнитель|проектировщик|арендодател|продавец|лизингодател|агент|перевозчик|экспедитор|подрядн/i;
+      const cpRole = /^(суб|ген)?подрядчик|поставщик|исполнитель|проектировщик|арендодател|продавец|лизингодател|агент|перевозчик|экспедитор|подрядн|участник|дольщик|цессионар|инвестор/i;
       const ourRole = /^заказчик|покупател|арендатор|застройщик|лизингополучател|принципал|клиент/i;
       const byRole = others.filter(p=>cpRole.test(p.role||''));
       const notOurs = others.filter(p=>!ourRole.test(p.role||''));
@@ -1063,6 +1077,7 @@ function docCard(){
       <div class="hint">Чтобы приложение узнавало вашу сторону само, внесите организации Группы с ИНН на вкладке «Настройки».</div></div>` : ''}
     ${S.cpDoc && S.cp && normName(S.cpDoc) !== normName(S.cp) ? `<div class="verdict v-neg" style="margin:10px 0 0"><b>ЕГРЮЛ по ИНН ${esc(S.inn)} даёт другое наименование</b>В договоре — ${esc(S.cpDoc)}, по ЕГРЮЛ — ${esc(S.cp)}. Так бывает, когда ИНН в реквизитах стоит у другой стороны. Проверьте по договору, чей это ИНН, и при необходимости выберите другую сторону.</div>` : ''}
     ${!d.parties.length ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>Стороны не найдены</b>В тексте нет ни ИНН, ни наименований в привычном виде. Заполните контрагента вручную.</div>` : ''}
+    ${d.bankNote ? `<div class="hint">${esc(d.bankNote)} — банк, упомянутый в договоре; стороной не считается.</div>` : ''}
     ${d.notes.length ? `<div class="hint">${d.notes.map(esc).join('; ')}.</div>` : ''}
     <div class="hint">Разбор автоматический — сверьте значения с договором. Всё подставленное можно поправить в полях ниже.</div>`;
   } else body = `<p class="small muted" style="margin:0 0 4px">Загрузите проект договора — приложение найдёт в нём стороны, ИНН, ОГРН, предмет, цену и аванс и заполнит сделку${extVersion()?', а затем само запустит автопроверку контрагента':''}. Файл читается в этом браузере и никуда не отправляется.</p>`;
