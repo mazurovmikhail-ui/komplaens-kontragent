@@ -987,6 +987,11 @@ async function loadContract(file){
     else throw new Error(ext === 'doc' || ext === 'rtf' ? 'старый формат .' + ext + ' не читается — сохраните договор как .docx или PDF' : 'поддерживаются .docx, .pdf и .txt');
     const r = parseContract(text);
     docInfo = Object.assign(r, {file:file.name});
+    /* новый договор — новая сделка: от прежней остаются только организация, инициатор и даты,
+       иначе аванс, ОГРН, договоры, отметки чек-листа и итоги автопроверки переезжают в новую проверку */
+    const keep = {org:S.org, orgText:S.orgText, initiator:S.initiator, date:S.date, received:S.received, km:S.km, fromInit:S.fromInit};
+    S = Object.assign(blank(), keep);
+    egrulPdf = ''; egrulPdfInn = ''; autoErr = ''; fsspWait = false;
     const mine = r.parties.find(p=>p.mine); if(mine) S.org = mine.mine.id;
     if(r.subj) S.subj = r.subj;
     if(r.sum) S.sum = String(r.sum);
@@ -1484,6 +1489,8 @@ async function autoCheck(){
   autoBusy = true; autoErr = ''; render();
   try{
     const d = await extCall('check', inn, 300000);
+    /* пока шла проверка, могли загрузить другой договор — чужой результат в новую сделку не пишется */
+    if(digits(S.inn) !== inn){ autoBusy = false; render(); return; }
     const keepEnf = S.auto && S.auto.inn === inn ? S.auto.enf : null;
     const eg = d.egrul ? {name:str(d.egrul.name,200), full:str(d.egrul.full,300), ogrn:str(d.egrul.ogrn,15), kpp:str(d.egrul.kpp,9),
                           reg:str(d.egrul.reg,10), region:str(d.egrul.region,80), head:str(d.egrul.head,200), ended:str(d.egrul.ended,10)} : null;
