@@ -855,11 +855,20 @@ async function unzipEntry(buf, name){
   }
   throw new Error('в файле нет текста документа');
 }
+function xmlText(x){
+  return x.replace(/<\/w:p>/g, '\n').replace(/<w:(tab|br)\b[^>]*\/>/g, ' ').replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+}
 async function docxText(buf){
   const xml = new TextDecoder().decode(await unzipEntry(buf, 'word/document.xml'));
-  return xml.replace(/<\/w:p>/g, '\n').replace(/<\/w:tc>/g, ' \t ').replace(/<w:(tab|br)\b[^>]*\/>/g, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+  /* таблица из двух столбцов (обычно реквизиты сторон) читается по столбцам: тогда наименование, ИНН и ОГРН
+     каждой стороны идут подряд, а не вперемешку построчно; остальные таблицы — построчно */
+  const withTables = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, tbl=>{
+    const rows = [...tbl.matchAll(/<w:tr\b[\s\S]*?<\/w:tr>/g)].map(m=>[...m[0].matchAll(/<w:tc\b[\s\S]*?<\/w:tc>/g)].map(c=>xmlText(c[0]).trim()));
+    if(rows.length >= 2 && rows.every(r=>r.length === 2)) return '\n' + rows.map(r=>r[0]).join('\n') + '\n\n' + rows.map(r=>r[1]).join('\n') + '\n';
+    return '\n' + rows.map(r=>r.join(' \t ')).join('\n') + '\n';
+  });
+  return xmlText(withTables);
 }
 function loadScript(src){
   return new Promise((res, rej)=>{ const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = ()=>rej(new Error('не удалось загрузить модуль чтения PDF — проверьте интернет')); document.head.appendChild(s); });
@@ -907,9 +916,12 @@ function parseContract(raw){
      до закрывающей кавычки, после которой идёт запятая, скобка, «именуемое», «в лице» или реквизит */
   const reOrg = new RegExp(ORG_FORM + '\\s*[«"“„][^\\n]{2,140}?[»"”](?=\\s*(?:[,(;]|именуем|в\\s+лице|ИНН|КПП|ОГРН|адрес|$|\\n))', 'gi');
   const reIp = /Индивидуальный\s+предприниматель\s+[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+)?/g;
-  [reOrg, reIp].forEach(re=>{ let m; while((m = re.exec(text))) names.push({t:shortForm(m[0]), at:m.index}); });
+  [reOrg, reIp].forEach(re=>{ let m; while((m = re.exec(text))) names.push({t:shortForm(m[0]), at:m.index, end:m.index + m[0].length}); });
   names.sort((a,b)=>a.at-b.at);
-  const uniqNames = []; names.forEach(n=>{ if(!uniqNames.find(x=>normName(x.t)===normName(n.t))) uniqNames.push(n); });
+  /* роль стороны — «именуемое в дальнейшем «Подрядчик»» сразу после наименования */
+  names.forEach(n=>{ const m = text.slice(n.end, n.end + 160).match(/именуем\S*(?:\s+в\s+дальнейшем)?\s*[«"“]?\s*([А-ЯЁа-яё-]{4,})/i); if(m) n.role = m[1].replace(/^./, c=>c.toUpperCase()); });
+  const uniqNames = []; names.forEach(n=>{ const u = uniqNames.find(x=>normName(x.t)===normName(n.t)); if(!u) uniqNames.push(Object.assign({}, n)); else if(!u.role && n.role) u.role = n.role; });
+  const roleOf = t => (uniqNames.find(x=>normName(x.t)===normName(t))||{}).role || '';
 
   const inns = []; { const re = /ИНН(?:\s*\/\s*КПП)?[\s:№]*?(\d{12}|\d{10})(?!\d)/gi; let m; while((m = re.exec(text))) if(!inns.find(x=>x.v===m[1])) inns.push({v:m[1], at:m.index}); }
   const ogrns = []; { const re = /ОГРН(?:ИП)?[\s:№]*?(\d{15}|\d{13})(?!\d)/gi; let m; while((m = re.exec(text))) if(!ogrns.find(x=>x.v===m[1])) ogrns.push({v:m[1], at:m.index}); }
@@ -921,14 +933,21 @@ function parseContract(raw){
     const mine = ORGS.find(o=>digits(o.inn) === inn.v);
     r.parties.push({inn:inn.v, ogrn:okOgrn ? og.v : '', name:'', mine:mine||null, order:i});
   });
-  /* названия сопоставляются с ИНН по порядку: сторона 1 и сторона 2 в преамбуле и в реквизитах идут одинаково */
-  const free = uniqNames.slice();
-  r.parties.forEach(p=>{ if(p.mine){ const k = free.findIndex(n=>normName(n.t)===normName(p.mine.name)); if(k>=0) free.splice(k,1); p.name = p.mine.name; } });
-  r.parties.filter(p=>!p.mine).forEach(p=>{
-    const k = free.findIndex(n=>!ORGS.find(o=>normName(o.name)===normName(n.t)));
-    if(k>=0){ p.name = free[k].t; free.splice(k,1); }
+  /* наименование к ИНН — ближайшее упоминание перед ним (в реквизитах ИНН идёт после названия);
+     если перед ИНН ничего нет — ближайшее после; порядок сторон в преамбуле не используется */
+  const taken = new Set();
+  r.parties.forEach(p=>{
+    if(p.mine){ p.name = p.mine.name; taken.add(normName(p.mine.name)); return; }
+    const innAt = inns.find(x=>x.v===p.inn).at;
+    const before = names.filter(n=>n.at < innAt && innAt - n.at < 1500 && !taken.has(normName(n.t))).pop();
+    const after  = names.find(n=>n.at > innAt && n.at - innAt < 400 && !taken.has(normName(n.t)));
+    const pick = before || after;
+    if(pick){ p.name = pick.t; taken.add(normName(pick.t)); }
   });
+  /* стороны без ИНН в тексте, но с наименованием */
+  r.parties.forEach(p=>{ if(!p.name){ const n = uniqNames.find(x=>!taken.has(normName(x.t)) && !ORGS.find(o=>normName(o.name)===normName(x.t))); if(n){ p.name = n.t; taken.add(normName(n.t)); } } });
   if(!r.parties.length) uniqNames.filter(n=>!ORGS.find(o=>normName(o.name)===normName(n.t))).slice(0,2).forEach(n=>r.parties.push({inn:'', ogrn:'', name:n.t, mine:null}));
+  r.parties.forEach(p=>{ p.role = roleOf(p.name); if(!p.mine && p.name && ORGS.find(o=>normName(o.name)===normName(p.name))) p.mine = ORGS.find(o=>normName(o.name)===normName(p.name)); });
 
   /* номер и дата */
   let m = head.match(/ДОГОВОР[^\n№]{0,80}№\s*([^\s,;]+)/i); if(m) r.num = m[1].replace(/[_]+/g,'').slice(0,40);
@@ -973,7 +992,7 @@ function applyParty(i){
   if(p.inn) S.inn = p.inn;
   if(p.ogrn) S.ogrn = p.ogrn; else S.ogrn = '';
   if(p.name) S.cp = p.name;
-  S.auto = null; autoErr = '';
+  S.cpDoc = ''; S.auto = null; autoErr = '';
   render();
   if(extVersion() && [10,12].includes(digits(S.inn).length)) autoCheck();
 }
@@ -994,7 +1013,7 @@ async function loadContract(file){
        иначе аванс, ОГРН, договоры, отметки чек-листа и итоги автопроверки переезжают в новую проверку */
     const keep = {org:S.org, orgText:S.orgText, initiator:S.initiator, date:S.date, received:S.received, km:S.km, fromInit:S.fromInit};
     S = Object.assign(blank(), keep);
-    egrulPdf = ''; egrulPdfInn = ''; autoErr = ''; fsspWait = false;
+    egrulPdf = ''; egrulPdfInn = ''; autoErr = ''; fsspWait = false; S.cpDoc = '';
     const mine = r.parties.find(p=>p.mine); if(mine) S.org = mine.mine.id;
     if(r.subj) S.subj = r.subj;
     if(r.sum) S.sum = String(r.sum);
@@ -1002,8 +1021,19 @@ async function loadContract(file){
     S.dogovor = [r.num && '№ ' + r.num, r.date && 'от ' + r.date].filter(Boolean).join(' ');
     const others = r.parties.filter(p=>!p.mine);
     docBusy = false;
+    r.pickedWhy = '';
     if(others.length === 1) applyParty(r.parties.indexOf(others[0]));
-    else render();
+    else {
+      /* организации Группы в договоре не узнаны — выбираем по роли: контрагент обычно подрядчик,
+         поставщик, исполнитель, а не заказчик или покупатель; если по ролям не ясно — спрашиваем */
+      const cpRole = /^(суб|ген)?подрядчик|поставщик|исполнитель|проектировщик|арендодател|продавец|лизингодател|агент|перевозчик|экспедитор|подрядн/i;
+      const ourRole = /^заказчик|покупател|арендатор|застройщик|лизингополучател|принципал|клиент/i;
+      const byRole = others.filter(p=>cpRole.test(p.role||''));
+      const notOurs = others.filter(p=>!ourRole.test(p.role||''));
+      const chosen = byRole.length === 1 ? byRole[0] : (notOurs.length === 1 ? notOurs[0] : null);
+      if(chosen){ r.pickedWhy = `в договоре «${chosen.role}» — контрагент выбран по роли, организация Группы в справочнике не найдена`; applyParty(r.parties.indexOf(chosen)); }
+      else render();
+    }
     toast('Договор прочитан');
   }catch(e){
     docBusy = false; docInfo = {error:String((e && e.message) || e), file:file.name, parties:[]}; render();
@@ -1017,18 +1047,21 @@ function docCard(){
   else if(d && d.error) body = `<div class="verdict v-neg" style="margin:0 0 10px"><b>Договор не прочитан</b>${esc(d.error)}</div>`;
   else if(d){
     const others = d.parties.filter(p=>!p.mine), mine = d.parties.find(p=>p.mine);
-    const need = others.length !== 1;
+    const need = others.length !== 1 && d.picked === undefined;
     const yes = (k,v)=>`<tr><th style="width:34%">${k}</th><td>${v}</td></tr>`;
     body = `<div class="scroll"><table class="t"><tbody>
       ${yes('Файл', esc(d.file) + (S.dogovor?` · договор ${esc(S.dogovor)}`:''))}
       ${yes('Организация Группы', mine ? esc(mine.mine.name) + ` <span class="muted">· узнана по ИНН ${esc(mine.inn)}</span>` : '<span class="muted">не узнана — выберите в списке ниже</span>')}
-      ${yes('Контрагент', d.picked!==undefined && d.parties[d.picked] ? `<b>${esc(d.parties[d.picked].name||'наименование не найдено')}</b>, ИНН ${esc(d.parties[d.picked].inn||'—')}${d.parties[d.picked].ogrn?`, ОГРН ${esc(d.parties[d.picked].ogrn)}`:''}` : '<span class="muted">не выбран</span>')}
+      ${yes('Контрагент', d.picked!==undefined && d.parties[d.picked] ? `<b>${esc(d.parties[d.picked].name||'наименование не найдено')}</b>${d.parties[d.picked].role?` («${esc(d.parties[d.picked].role)}»)`:''}, ИНН ${esc(d.parties[d.picked].inn||'—')}${d.parties[d.picked].ogrn?`, ОГРН ${esc(d.parties[d.picked].ogrn)}`:''}${d.pickedWhy?`<div class="hint" style="color:var(--warn)">${esc(d.pickedWhy)}. Если это не так — <button class="btn ghost" style="padding:1px 7px;font-size:11.5px" data-docrepick="1">выбрать другую сторону</button></div>`:''}` : '<span class="muted">не выбран</span>')}
+      ${d.parties.length > 1 ? yes('Стороны в договоре', d.parties.map(p=>`${esc(p.name||'без наименования')}${p.role?` — «${esc(p.role)}»`:''}${p.inn?`, ИНН ${esc(p.inn)}`:''}${p.mine?' <span class="badge b-acc">организация Группы</span>':''}`).join('<br>')) : ''}
       ${yes('Предмет', d.subj ? esc((SUBJECTS.find(x=>x.v===d.subj)||{}).t||'') : '<span class="muted">не определён — выберите вручную</span>')}
       ${yes('Цена', d.sum ? money(d.sum) + ' ₽' : '<span class="muted">не найдена</span>')}
       ${yes('Аванс', d.avans ? d.avans + ' %' : '<span class="muted">в тексте не найден — оставлена оплата по факту</span>')}
     </tbody></table></div>
     ${need && d.parties.length ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>Кто из сторон контрагент?</b>${others.length ? 'В договоре несколько сторон, которых нет в справочнике организаций Группы.' : 'Контрагент не определён.'}
-      <div class="btnrow" style="margin-top:8px">${d.parties.map((p,i)=>p.mine?'':`<button class="btn" data-docpick="${i}">${esc(p.name||'без наименования')}${p.inn?` · ИНН ${esc(p.inn)}`:''}</button>`).join('')}</div></div>` : ''}
+      <div class="btnrow" style="margin-top:8px">${d.parties.map((p,i)=>p.mine?'':`<button class="btn" data-docpick="${i}">${esc(p.name||'без наименования')}${p.role?` («${esc(p.role)}»)`:''}${p.inn?` · ИНН ${esc(p.inn)}`:''}</button>`).join('')}</div>
+      <div class="hint">Чтобы приложение узнавало вашу сторону само, внесите организации Группы с ИНН на вкладке «Настройки».</div></div>` : ''}
+    ${S.cpDoc && S.cp && normName(S.cpDoc) !== normName(S.cp) ? `<div class="verdict v-neg" style="margin:10px 0 0"><b>ЕГРЮЛ по ИНН ${esc(S.inn)} даёт другое наименование</b>В договоре — ${esc(S.cpDoc)}, по ЕГРЮЛ — ${esc(S.cp)}. Так бывает, когда ИНН в реквизитах стоит у другой стороны. Проверьте по договору, чей это ИНН, и при необходимости выберите другую сторону.</div>` : ''}
     ${!d.parties.length ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>Стороны не найдены</b>В тексте нет ни ИНН, ни наименований в привычном виде. Заполните контрагента вручную.</div>` : ''}
     ${d.notes.length ? `<div class="hint">${d.notes.map(esc).join('; ')}.</div>` : ''}
     <div class="hint">Разбор автоматический — сверьте значения с договором. Всё подставленное можно поправить в полях ниже.</div>`;
@@ -1501,7 +1534,7 @@ async function autoCheck(){
                           reg:str(d.egrul.reg,10), region:str(d.egrul.region,80), head:str(d.egrul.head,200), ended:str(d.egrul.ended,10)} : null;
     if(d.egrul && typeof d.egrul.pdf === 'string' && d.egrul.pdf.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(d.egrul.pdf)){ egrulPdf = d.egrul.pdf; egrulPdfInn = inn; }
     if(eg){
-      if(eg.name && (!S.cp || normName(S.cp) !== normName(eg.name))) S.cpDoc = S.cp, S.cp = shortForm(eg.name);
+      if(eg.name && (!S.cp || normName(S.cp) !== normName(eg.name))){ S.cpDoc = S.cp || ''; S.cp = shortForm(eg.name); }
       if(eg.ogrn) S.ogrn = eg.ogrn;
       const m = eg.reg.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
       if(m){ const yrs = (Date.now() - new Date(+m[3], +m[2]-1, +m[1]).getTime()) / (365.25*864e5); S.age = yrs < 1 ? '<1' : (yrs < 3 ? '1-3' : '>3'); }
@@ -2231,12 +2264,13 @@ document.addEventListener('change', e=>{
 });
 
 document.addEventListener('click', e=>{
-  const t = e.target.closest('[data-step],[data-go],[data-act],[data-view],[data-open],[data-del],[data-mon],[data-copyinn],[data-orgdel],[data-role],[data-ctdel],[data-rqreset],[data-rqxdel],[data-exdel],[data-docpick],[data-hint]');
+  const t = e.target.closest('[data-step],[data-go],[data-act],[data-view],[data-open],[data-del],[data-mon],[data-copyinn],[data-orgdel],[data-role],[data-ctdel],[data-rqreset],[data-rqxdel],[data-exdel],[data-docpick],[data-docrepick],[data-hint]');
   if(!t) return;
 
   if(t.dataset.role){ ROLE = t.dataset.role; try{ localStorage.setItem(LS.role, ROLE); }catch(err){} render(); return; }
   if(t.dataset.hint !== undefined){ takeHint(t.dataset.hint); return; }
   if(t.dataset.docpick !== undefined){ applyParty(Number(t.dataset.docpick)); return; }
+  if(t.dataset.docrepick !== undefined){ if(docInfo){ delete docInfo.picked; docInfo.pickedWhy = ''; } S.cpDoc = ''; render(); return; }
   if(t.dataset.ctdel !== undefined){ S.contracts.splice(Number(t.dataset.ctdel),1); render(); return; }
   if(t.dataset.rqreset !== undefined){ delete S.req.edit[t.dataset.rqreset]; render(); return; }
   if(t.dataset.rqxdel !== undefined){ S.req.extra.splice(Number(t.dataset.rqxdel),1); render(); return; }
