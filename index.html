@@ -260,6 +260,7 @@
 
 </div>
 <div class="toast" id="toast"></div>
+<input type="file" id="fpick" hidden>
 
 <script>
 "use strict";
@@ -548,6 +549,15 @@ function fallbackCopy(text){
   document.body.appendChild(ta); ta.select();
   try{ document.execCommand('copy'); toast('Скопировано в буфер обмена'); }catch(e){ toast('Скопировать не удалось'); }
   document.body.removeChild(ta);
+}
+/* Выбор файла — через один постоянный <input> в разметке: временный, не вставленный в документ,
+   Chrome может убрать сборщиком мусора до того, как придёт событие выбора, и тогда файл «не виден».
+   value сбрасывается, чтобы повторный выбор того же файла тоже срабатывал. */
+function pickFile(accept, cb){
+  const inp = document.getElementById('fpick');
+  inp.accept = accept; inp.value = '';
+  inp.onchange = ()=>{ const f = inp.files && inp.files[0]; if(f){ toast(`Файл получен: ${f.name}`); cb(f); } };
+  inp.click();
 }
 function download(name, text, mime){
   try{
@@ -875,7 +885,7 @@ function loadScript(src){
 }
 async function pdfText(buf){
   if(!window.pdfjsLib){ await loadScript(PDFJS + 'pdf.min.js'); window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; }
-  const pdf = await window.pdfjsLib.getDocument({data:buf}).promise;
+  let pdf; try{ pdf = await window.pdfjsLib.getDocument({data:buf}).promise; }catch(e){ throw new Error('файл не читается как PDF — возможно, он повреждён или это не PDF'); }
   const out = [];
   for(let n = 1; n <= Math.min(pdf.numPages, 80); n++){
     const tc = await (await pdf.getPage(n)).getTextContent();
@@ -1036,6 +1046,7 @@ async function loadContract(file){
     const others = r.parties.filter(p=>!p.mine);
     docBusy = false;
     r.pickedWhy = '';
+    setTimeout(()=>{ const el = document.querySelector('#s1 [data-act="doc-load"]'); if(el) el.closest('.card').scrollIntoView({behavior:'smooth', block:'start'}); }, 50);
     if(others.length === 1) applyParty(r.parties.indexOf(others[0]));
     else {
       /* организации Группы в договоре не узнаны — выбираем по роли: контрагент обычно подрядчик,
@@ -2318,11 +2329,7 @@ document.addEventListener('click', e=>{
 
   if(a==='new'){ S = blank(); autoErr=''; fsspWait=false; docInfo=null; step=1; render(); toast(ROLE==='init'?'Новая сделка':'Новая проверка'); return; }
   if(a==='copy-skip'){ copy(skipSheetText()); return; }
-  if(a==='doc-load'){
-    const inp = document.createElement('input'); inp.type='file'; inp.accept='.docx,.pdf,.txt';
-    inp.onchange = ()=>{ const f = inp.files && inp.files[0]; if(f) loadContract(f); };
-    inp.click(); return;
-  }
+  if(a==='doc-load'){ pickFile('.docx,.pdf,.txt', f=>loadContract(f)); return; }
   if(a==='ct-add'){ S.contracts.push({org:'', what:'', sum:'', linked:false}); render(); return; }
   if(a==='deal-link' || a==='deal-file'){
     S.fromInit = {who:S.initiator, at:today()};
@@ -2334,12 +2341,8 @@ document.addEventListener('click', e=>{
     return;
   }
   if(a==='deal-load'){
-    const inp = document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
-    inp.onchange = ()=>{
-      const f = inp.files && inp.files[0]; if(!f) return;
-      f.text().then(txt=>{ try{ takeDeal(JSON.parse(txt.replace(/^\uFEFF/,''))); }catch(err){ toast('Не удалось разобрать файл сделки'); } });
-    };
-    inp.click(); return;
+    pickFile('.json,application/json', f=>f.text().then(txt=>{ try{ takeDeal(JSON.parse(txt.replace(/^\uFEFF/,''))); }catch(err){ toast('Не удалось разобрать файл сделки'); } }));
+    return;
   }
   if(a==='init-link'){ copy(baseUrl()+'#init='+pack({orgs:ORGS, excl:EXCL})); return; }
   if(a==='ex-add'){ EXCL.push({inn:'', name:'', kind:'mono'}); save(LS.excl,EXCL); render(); return; }
@@ -2456,7 +2459,7 @@ function readHash(){
   const h = location.hash || '';
   const m = h.match(/^#(init|deal)=(.+)$/);
   if(!m) return;
-  let d; try{ d = unpack(m[2]); }catch(e){ toast('Ссылка повреждена — попросите прислать её заново'); return; }
+  let d; try{ d = unpack(m[2]); }catch(e){ history.replaceState(null, '', baseUrl()); toast('Ссылка повреждена — попросите прислать её заново'); return; }
   history.replaceState(null, '', baseUrl());
   if(m[1]==='deal'){ takeDeal(d); return; }
   if(!d || !Array.isArray(d.orgs)) return;
