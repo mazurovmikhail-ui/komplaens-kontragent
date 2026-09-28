@@ -899,7 +899,22 @@ async function pdfText(buf){
 }
 
 const ORG_FORM = '(?:Общество\\s+с\\s+ограниченной\\s+ответственностью|Публичное\\s+акционерное\\s+общество|Непубличное\\s+акционерное\\s+общество|Закрытое\\s+акционерное\\s+общество|Открытое\\s+акционерное\\s+общество|Акционерное\\s+общество|ООО|ПАО|НАО|ЗАО|ОАО|АО)';
-function normName(t){ const m = String(t||'').match(/[«"“„]([^»"”“]+)[»"”]/); return (m ? m[1] : String(t||'')).toLowerCase().replace(/[^a-zа-яё0-9]+/g,''); }
+/* Наименования сравниваются без организационной формы, кавычек и регистра: «ООО «СЗ «Строй Проект»»
+   и «ООО "СЗ "СТРОЙ ПРОЕКТ"» — одно и то же, «Авиационная компания «Трансаэро»» и «АК «Трансаэро»» — тоже. */
+const FORM_PHRASES = /общество\s+с\s+ограниченной\s+ответственностью|публичное\s+акционерное\s+общество|непубличное\s+акционерное\s+общество|закрытое\s+акционерное\s+общество|открытое\s+акционерное\s+общество|акционерное\s+общество|индивидуальный\s+предприниматель|специализированный\s+застройщик/g;
+const FORM_TOKENS = new Set(['ооо','пао','нао','зао','оао','ао','ип','сз']);
+function nameTokens(t){
+  return String(t||'').toLowerCase().replace(/ё/g,'е').replace(FORM_PHRASES,' ').split(/[^a-zа-я0-9]+/).filter(x=>x && !FORM_TOKENS.has(x));
+}
+function normName(t){ return nameTokens(t).join(''); }
+function sameOrg(a, b){
+  const A = nameTokens(a), B = nameTokens(b);
+  if(!A.length || !B.length) return false;
+  if(A.join('') === B.join('')) return true;
+  const [small, large] = A.length <= B.length ? [A, B] : [B, A];
+  const key = small.filter(x=>x.length >= 4);
+  return key.length > 0 && key.every(x=>large.includes(x));
+}
 function shortForm(t){
   return t.replace(/Общество\s+с\s+ограниченной\s+ответственностью/i,'ООО').replace(/Публичное\s+акционерное\s+общество/i,'ПАО')
           .replace(/Непубличное\s+акционерное\s+общество/i,'НАО').replace(/Закрытое\s+акционерное\s+общество/i,'ЗАО')
@@ -924,7 +939,7 @@ function parseContract(raw){
   const names = [];
   /* кавычки бывают вложенными («АК «Трансаэро», "Компания "Ромашка"), поэтому название берётся
      до закрывающей кавычки, после которой идёт запятая, скобка, «именуемое», «в лице» или реквизит */
-  const reOrg = new RegExp(ORG_FORM + '(?:\\s+[А-ЯЁ][А-ЯЁа-яё-]+){0,4}\\s*[«"“„][^\\n]{2,140}?[»"”](?=\\s*(?:[,(;.]|именуем|в\\s+лице|ИНН|КПП|ОГРН|адрес|$|\\n))', 'gi');
+  const reOrg = new RegExp(ORG_FORM + '(?:\\s+[А-ЯЁ][А-ЯЁа-яё-]+){0,4}\\s*[«"“„][^\\n]{2,140}?[»"”](?=\\s*(?:[,(;.]|именуем|в\\s+лице|ИНН|КПП|ОГРН|адрес|$|\\n)|\\s+' + ORG_FORM + '[\\s«"“„]|\\s+Индивидуальный\\s)', 'gi');
   const reIp = /Индивидуальный\s+предприниматель\s+[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ][а-яё-]+)?/g;
   /* физическое лицо: «гражданин РФ Иванов Иван Иванович» либо Ф.И.О., за которым идут паспорт, дата рождения, ИНН или «именуемый» */
   const rePerson = /(?:гражданин(?:ка)?\s+(?:РФ|Российской\s+Федерации)?\s*,?\s*)?([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+(?:\s+(?:оглы|кызы|улы))?)(?=\s*,?\s*(?:\d{2}\.\d{2}\.\d{4}|паспорт|дата\s+рождения|\d{2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|ИНН|СНИЛС|именуем|зарегистрирован|пол\b))/g;
@@ -955,19 +970,47 @@ function parseContract(raw){
   });
   /* наименование к ИНН — ближайшее упоминание перед ним (в реквизитах ИНН идёт после названия);
      если перед ИНН ничего нет — ближайшее после; порядок сторон в преамбуле не используется */
+  /* Привязка наименований к ИНН. ИНН, между которыми нет ни одного наименования, образуют серию:
+     так выглядит таблица реквизитов, прочитанная построчно («ООО А   ООО Б» / «ИНН 1   ИНН 2»).
+     Серии из k ИНН достаются k ближайших разных наименований перед ней — в том же порядке.
+     Одиночному ИНН — ближайшее наименование перед ним, а если его нет, то после. */
   const taken = new Set();
-  r.parties.forEach(p=>{
-    if(p.mine){ p.name = p.mine.name; taken.add(normName(p.mine.name)); return; }
-    const innAt = inns.find(x=>x.v===p.inn).at;
-    const before = names.filter(n=>n.at < innAt && innAt - n.at < 1500 && !taken.has(normName(n.t))).pop();
-    const after  = names.find(n=>n.at > innAt && n.at - innAt < 400 && !taken.has(normName(n.t)));
-    const pick = before || after;
-    if(pick){ p.name = pick.t; taken.add(normName(pick.t)); }
+  const innAll = []; { const re = /ИНН(?:\s*\/\s*КПП)?[\s:№]*?(\d{12}|\d{10})(?!\d)/gi; let m; while((m = re.exec(text))) innAll.push(m.index); }
+  const nearestName = at => names.filter(n=>n.at < at && at - n.at < 3000 && !taken.has(normName(n.t))).pop()
+                         || names.find(n=>n.at > at && n.at - at < 600 && !taken.has(normName(n.t)));
+  const assign = (inn, n)=>{
+    const party = r.parties.find(x=>x.inn === inn.v);
+    if(n) taken.add(normName(n.t));
+    if(party.mine){ party.name = party.mine.name; taken.add(normName(party.mine.name)); }
+    else if(n) party.name = n.t;
+  };
+  const runs = []; let cur = [];
+  inns.forEach((inn, i)=>{
+    const prev = inns[i-1];
+    if(prev && names.some(n=>n.at > prev.at && n.at < inn.at)){ runs.push(cur); cur = []; }
+    cur.push(inn);
+  });
+  if(cur.length) runs.push(cur);
+  runs.forEach(run=>{
+    const start = run[0].at, got = [];
+    for(let k = names.length - 1; k >= 0 && got.length < run.length; k--){
+      const n = names[k];
+      if(n.at < start && start - n.at < 3000 && !taken.has(normName(n.t)) && !got.some(g=>normName(g.t) === normName(n.t))) got.push(n);
+    }
+    got.reverse();
+    if(got.length < run.length){
+      const end = run[run.length-1].at;
+      names.filter(n=>n.at > end && n.at - end < 600 && !taken.has(normName(n.t)) && !got.some(g=>normName(g.t) === normName(n.t))).slice(0, run.length - got.length).forEach(n=>got.push(n));
+    }
+    const tabular = run.length > 1 && got.length === run.length && got[0].at < start
+      && !innAll.some(at=>at > got[0].at && at < start);
+    if(tabular) run.forEach((inn, k)=>assign(inn, got[k]));
+    else run.forEach(inn=>assign(inn, nearestName(inn.at)));
   });
   /* стороны без ИНН в тексте, но с наименованием */
   r.parties.forEach(p=>{ if(!p.name){ const n = uniqNames.find(x=>!taken.has(normName(x.t)) && !ORGS.find(o=>normName(o.name)===normName(x.t))); if(n){ p.name = n.t; taken.add(normName(n.t)); } } });
   if(!r.parties.length) uniqNames.filter(n=>!ORGS.find(o=>normName(o.name)===normName(n.t))).slice(0,2).forEach(n=>r.parties.push({inn:'', ogrn:'', name:n.t, mine:null}));
-  r.parties.forEach(p=>{ p.role = roleOf(p.name); if(!p.mine && p.name && ORGS.find(o=>normName(o.name)===normName(p.name))) p.mine = ORGS.find(o=>normName(o.name)===normName(p.name)); });
+  r.parties.forEach(p=>{ p.role = roleOf(p.name); if(!p.mine && p.name){ const o = ORGS.find(o=>o.name && sameOrg(o.name, p.name)); if(o) p.mine = o; } });
   /* банк, упомянутый в договоре (эскроу, расчёты, гарантия), стороной не является — если без него остаются двое */
   const banks = r.parties.filter(p=>/банк/i.test(p.name||'') && !/^(заёмщик|заемщик|кредитор|гарант|банк)$/i.test(p.role||'') && !p.mine);
   if(banks.length && r.parties.length - banks.length >= 2){ r.bankNote = banks.map(b=>b.name).join(', '); r.parties = r.parties.filter(p=>!banks.includes(p)); }
@@ -1086,7 +1129,8 @@ function docCard(){
     ${need && d.parties.length ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>Кто из сторон контрагент?</b>${others.length ? 'В договоре несколько сторон, которых нет в справочнике организаций Группы.' : 'Контрагент не определён.'}
       <div class="btnrow" style="margin-top:8px">${d.parties.map((p,i)=>p.mine?'':`<button class="btn" data-docpick="${i}">${esc(p.name||'без наименования')}${p.role?` («${esc(p.role)}»)`:''}${p.inn?` · ИНН ${esc(p.inn)}`:''}</button>`).join('')}</div>
       <div class="hint">Чтобы приложение узнавало вашу сторону само, внесите организации Группы с ИНН на вкладке «Настройки».</div></div>` : ''}
-    ${S.cpDoc && S.cp && normName(S.cpDoc) !== normName(S.cp) ? `<div class="verdict v-neg" style="margin:10px 0 0"><b>ЕГРЮЛ по ИНН ${esc(S.inn)} даёт другое наименование</b>В договоре — ${esc(S.cpDoc)}, по ЕГРЮЛ — ${esc(S.cp)}. Так бывает, когда ИНН в реквизитах стоит у другой стороны. Проверьте по договору, чей это ИНН, и при необходимости выберите другую сторону.</div>` : ''}
+    ${d.swapped ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>ИНН сторон были перепутаны — исправлено</b>${esc(d.swapped)}. Сверьте с договором.</div>` : ''}
+    ${S.cpDoc && S.cp && !sameOrg(S.cpDoc, S.cp) ? `<div class="verdict v-neg" style="margin:10px 0 0"><b>ЕГРЮЛ по ИНН ${esc(S.inn)} даёт другое наименование</b>В договоре — ${esc(S.cpDoc)}, по ЕГРЮЛ — ${esc(S.cp)}. Так бывает, когда ИНН в реквизитах стоит у другой стороны. Проверьте по договору, чей это ИНН, и при необходимости выберите другую сторону.</div>` : ''}
     ${!d.parties.length ? `<div class="verdict v-cond" style="margin:10px 0 0"><b>Стороны не найдены</b>В тексте нет ни ИНН, ни наименований в привычном виде. Заполните контрагента вручную.</div>` : ''}
     ${d.bankNote ? `<div class="hint">${esc(d.bankNote)} — банк, упомянутый в договоре; стороной не считается.</div>` : ''}
     ${d.notes.length ? `<div class="hint">${d.notes.map(esc).join('; ')}.</div>` : ''}
@@ -1560,7 +1604,22 @@ async function autoCheck(){
                           reg:str(d.egrul.reg,10), region:str(d.egrul.region,80), head:str(d.egrul.head,200), ended:str(d.egrul.ended,10)} : null;
     if(d.egrul && typeof d.egrul.pdf === 'string' && d.egrul.pdf.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(d.egrul.pdf)){ egrulPdf = d.egrul.pdf; egrulPdfInn = inn; }
     if(eg){
-      if(eg.name && (!S.cp || normName(S.cp) !== normName(eg.name))){ S.cpDoc = S.cp || ''; S.cp = shortForm(eg.name); }
+      /* Страховка: если по ИНН выбранной стороны ЕГРЮЛ отдаёт другую сторону этого же договора,
+         значит ИНН в разборе перепутаны. Меняем их местами и проверяем заново — уже того, кого нужно. */
+      const me = docInfo && docInfo.picked !== undefined ? docInfo.parties[docInfo.picked] : null;
+      if(me && me.name && eg.name && !sameOrg(me.name, eg.name) && !docInfo.swapped){
+        const other = docInfo.parties.find(x=>x !== me && x.inn && x.name && sameOrg(x.name, eg.name));
+        if(other){
+          docInfo.swapped = `ИНН ${me.inn} по ЕГРЮЛ принадлежит другой стороне договора — ${other.name}. ИНН сторон поменяны местами, проверка запущена по ${me.name}`;
+          [me.inn, other.inn] = [other.inn, me.inn]; [me.ogrn, other.ogrn] = [other.ogrn, me.ogrn];
+          S.inn = me.inn; S.ogrn = me.ogrn || ''; S.cp = me.name; S.cpDoc = ''; S.auto = null;
+          egrulPdf = ''; egrulPdfInn = '';
+          autoBusy = false; render();
+          return autoCheck();
+        }
+      }
+      if(eg.name && (!S.cp || !sameOrg(S.cp, eg.name))){ S.cpDoc = S.cp || ''; S.cp = shortForm(eg.name); }
+      else if(eg.name) S.cpDoc = '';
       if(eg.ogrn) S.ogrn = eg.ogrn;
       const m = eg.reg.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
       if(m){ const yrs = (Date.now() - new Date(+m[3], +m[2]-1, +m[1]).getTime()) / (365.25*864e5); S.age = yrs < 1 ? '<1' : (yrs < 3 ? '1-3' : '>3'); }
@@ -1797,6 +1856,7 @@ function renderS3(){
   }).join('');
 
   document.getElementById('s3').innerHTML = `
+  <div class="verdict v-off" style="margin-bottom:12px"><b>Проверяется: ${esc(S.cp || 'контрагент не указан')}</b>ИНН ${esc(S.inn || '—')}${S.dogovor?` · договор ${esc(S.dogovor)}`:''}${S.auto && S.auto.inn && S.auto.inn !== digits(S.inn) ? ` · <span style="color:var(--crit)">автопроверка в записях ниже выполнена по другому ИНН (${esc(S.auto.inn)}) — запустите её заново</span>` : ''}</div>
   ${autoCard()}
   <div class="card">
     <div class="hd"><h2>Чек-лист комплаенс-проверки</h2><span class="ref">Приложение № 5 · уровень ${LVL_NAME[r.lvl].toLowerCase()} · позиции ${r.scope.length} из 28</span></div>
