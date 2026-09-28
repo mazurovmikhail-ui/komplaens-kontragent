@@ -1004,7 +1004,13 @@ function parseContract(raw){
     }
     const tabular = run.length > 1 && got.length === run.length && got[0].at < start
       && !innAll.some(at=>at > got[0].at && at < start);
-    if(tabular) run.forEach((inn, k)=>assign(inn, got[k]));
+    if(tabular){
+      run.forEach((inn, k)=>assign(inn, got[k]));
+      /* ОГРН в такой таблице тоже идут строкой после ИНН — раздаются по порядку */
+      const end = run[run.length-1].at;
+      const row = ogrns.filter(o=>o.at > end && o.at - end < 600).slice(0, run.length);
+      if(row.length === run.length) run.forEach((inn, k)=>{ const party = r.parties.find(x=>x.inn === inn.v); if((inn.v.length===12) === (row[k].v.length===15)) party.ogrn = row[k].v; });
+    }
     else run.forEach(inn=>assign(inn, nearestName(inn.at)));
   });
   /* стороны без ИНН в тексте, но с наименованием */
