@@ -7,6 +7,7 @@
 const F = []; const ok = (c, m) => { if(!c) F.push(m); };
 const pause = ms => new Promise(r => setTimeout(r, ms));
 const dl = []; window.download = (n) => dl.push(n); window.downloadB64 = (n) => dl.push(n);
+window.downloadBlob = (n, b) => { dl.push(n); window.__xlsx = b; };
 window.copy = t => { window.__copied = t; }; window.print = () => {}; window.confirm = () => true;
 let promptVal = null; window.prompt = () => promptVal;
 const fire = (el, type) => el.dispatchEvent(new Event(type, {bubbles:true}));
@@ -130,6 +131,18 @@ ok(/1\. РЕЗУЛЬТАТЫ/.test(ct) && /6\. СРОК ДЕЙСТВИЯ/.test(c
 ok(/Идёт ликвидация/.test(ct), 'S9 мотивировка стоп-фактора не попала в Заключение');
 click('[data-act="copy-concl"]'); ok(window.__copied === ct, 'S9 копирование');
 click('[data-act="doc-concl"]'); ok(dl.some(n=>/^Заключение_/.test(n)), 'S9 .doc');
+/* Excel: книга собирается, если модуль загрузился с cdnjs */
+click('[data-act="xlsx-concl"]'); for(let i=0; i<60 && !dl.some(n=>/\.xlsx$/.test(n)); i++) await pause(250);
+if(window.ExcelJS){
+  ok(dl.some(n=>/^Заключение_.*\.xlsx$/.test(n)), 'S9 Excel не скачан');
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await window.__xlsx.arrayBuffer());
+  ok(wb.worksheets.map(w=>w.name).join('|') === 'Заключение|Пороговые значения сумм|Чек лист|Стоп-факторы|Реестр|Финансы', 'S9 листы Excel: ' + wb.worksheets.map(w=>w.name).join('|'));
+  const z = wb.getWorksheet('Заключение'); ok(z.getCell('C7').value === S.inn, 'S9 ИНН в Excel: ' + z.getCell('C7').value);
+  const txt = []; wb.eachSheet(w=>w.eachRow(r=>r.eachCell(c=>txt.push(typeof c.value==='object' && c.value ? JSON.stringify(c.value) : String(c.value)))));
+  ok(txt.some(t=>/Риски принимает/.test(t)), 'S9 решение п. 8.3 не попало в Excel');
+  ok(txt.some(t=>/Идёт ликвидация/.test(t)), 'S9 мотивировка стоп-фактора не попала в Excel');
+  ok(txt.some(t=>/"formula":"IF\(N\(B/.test(t)), 'S9 в листе «Финансы» нет формул');
+} else F.push('S9 Excel: модуль не загрузился с cdnjs');
 const before = dl.length; click('[data-act="dossier"]'); await pause(2000); ok(dl.length - before >= 3, 'S9 досье: файлов ' + (dl.length - before));
 click('[data-act="save-reg"]'); ok(REG.length === 1 && REG[0].num === 'КМ-2026/001' && REG[0].contracts, 'S9 запись в Реестр');
 click('[data-act="save-reg"]'); ok(REG.length === 1, 'S9 повторная запись дублирует');
@@ -141,6 +154,7 @@ setVal('input[data-cr="7"][value="no"]', true, 'change');
 /* S10 реестр */
 click('.tab[data-view="registry"]'); ok(document.querySelectorAll('#v-registry tbody tr').length === 1, 'S10 строки реестра');
 click('#v-registry [data-mon="0"]'); ok(REG[0].monitor === today(), 'S10 мониторинг');
+click('[data-act="xlsx-reg"]'); for(let i=0; i<20 && !dl.includes('Реестр-комплаенс-проверок.xlsx'); i++) await pause(250); ok(dl.includes('Реестр-комплаенс-проверок.xlsx'), 'S10 Excel реестра');
 click('[data-act="csv"]'); ok(dl.includes('Реестр-комплаенс-проверок.csv'), 'S10 CSV'); click('[data-act="copy-csv"]'); ok(/Контрагент/.test(window.__copied) && /Действующие договоры/.test(window.__copied), 'S10 копия CSV');
 click('[data-act="export-reg"]'); const regJson = window.__copied;
 S = blank(); render(); click('.tab[data-view="registry"]'); click('#v-registry [data-open="0"]'); ok(view === 'check' && S.cp === 'ООО «Ромашка»' && S.req && S.contracts.length === 1, 'S10 открытие из реестра');

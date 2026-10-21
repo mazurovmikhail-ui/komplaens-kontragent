@@ -322,8 +322,10 @@ const CHECKLIST = [
   {n:23, p:2, t:'Финансовое состояние: выручка, прибыль (убыток), чистые активы, дебиторская и кредиторская задолженность, динамика за 3 года', s:'ГИР БО, отчётность контрагента', u:'https://bo.nalog.ru/', fin:true},
   {n:24, p:2, t:'Соотношение цены договора с выручкой и активами контрагента', s:'Расчёт комплаенс-менеджера', u:'', fin:true},
   {n:25, p:2, t:'Достаточность трудовых и производственных ресурсов для исполнения договора в заявленные сроки', s:'Анкета (форма Б), справка о численности и о МТБ', u:''},
-  {n:26, p:2, t:'Рыночность цены; для внутригрупповых сделок — принцип «вытянутой руки»', s:'Материалы инициатора, мнение финансового департамента', u:'', fin:true},
-  {n:27, p:2, t:'Допустимость и размер аванса, наличие лимита бюджета, источник финансирования, соответствие целевому назначению', s:'Мнение финансового департамента, условия кредитного договора', u:'', fin:true},
+  {n:26, p:2, t:'Рыночность цены; для внутригрупповых сделок — принцип «вытянутой руки»', s:'Материалы инициатора, мнение финансового департамента', u:'', fin:true,
+   h:'Когда запрашивать: позиция входит только в углублённый уровень, а на нём мнение финансового департамента обязательно (п. 6.4). Запрашивайте его сразу, как только присвоен углублённый уровень, — срок до 2 р.д., параллельно с проверкой. Коммерческие предложения и расчёт цены даёт инициатор.'},
+  {n:27, p:2, t:'Допустимость и размер аванса, наличие лимита бюджета, источник финансирования, соответствие целевому назначению', s:'Мнение финансового департамента, условия кредитного договора', u:'', fin:true,
+   h:'Когда запрашивать: так же, как по позиции 26, — с присвоением углублённого уровня, в одном запросе в финансовый департамент. Аванс и источник финансирования инициатор указывает на шаге «Сделка»; при проектном финансировании нужны условия кредитного договора.'},
   {n:28, p:2, t:'Информация о налоговых «разрывах» и рисках по цепочке с участием контрагента', s:'Требования, письма, информационные сообщения налогового органа', u:'', fin:true},
 ];
 /* Приложение № 1 — проверяемые позиции по уровням */
@@ -880,8 +882,8 @@ async function docxText(buf){
   });
   return xmlText(withTables);
 }
-function loadScript(src){
-  return new Promise((res, rej)=>{ const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = ()=>rej(new Error('не удалось загрузить модуль чтения PDF — проверьте интернет')); document.head.appendChild(s); });
+function loadScript(src, what){
+  return new Promise((res, rej)=>{ const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = ()=>rej(new Error(`не удалось загрузить ${what||'модуль чтения PDF'} — проверьте интернет`)); document.head.appendChild(s); });
 }
 async function pdfText(buf){
   if(!window.pdfjsLib){ await loadScript(PDFJS + 'pdf.min.js'); window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; }
@@ -1848,6 +1850,7 @@ function renderS3(){
     return `<div class="ci ${cls}">
       <div class="ci-hd"><span class="n">${n}</span><span class="what">${esc(it.t)}</span></div>
       <div class="src">${src}${S.inn?` · <button class="btn ghost" style="padding:1px 7px;font-size:11.5px" data-copyinn="1">копировать ИНН</button>`:''}</div>
+      ${it.h?`<div class="hint" style="margin:2px 0 6px">${esc(it.h)}</div>`:''}
       <div class="ctl">
         <span class="seg">
           <label><input type="radio" name="cl${n}" data-cl="${n}" value="ok" ${q==='ok'?'checked':''}><span>соответствует</span></label>
@@ -1952,6 +1955,11 @@ function renderS5(){
 }
 
 /* ====================== шаг 6 — заключение ====================== */
+const FIN_NAME = {own:'собственные средства', project:'проектное финансирование', dolevoe:'средства участников долевого строительства'};
+const REASON_NAME = {new:'новый договор', prolong:'продление, дополнительное соглашение', extra:'внеочередная проверка'};
+const Q_NAME = {ok:'соответствует', flag:'красный флаг', over:'преодолимый стоп-фактор', abs:'абсолютный стоп-фактор'};
+function payName(r){ return S.pay==='fact' ? 'оплата по факту' : S.pay==='cp-prepay' ? 'предоплата со стороны контрагента' : `аванс ${r.avans} %`; }
+function chosenTerms(r){ return TERMS.map((t,i)=>({t,i})).filter(({i})=> S.terms[i] || (i===0 && r.lvl>=2)); }
 function concText(){
   const r = calc(), o = r.org;
   const L = [];
@@ -1971,9 +1979,9 @@ function concText(){
   } else if(S.hasContracts==='no'){
     L.push('Действующие договоры с контрагентом: по сведениям инициатора отсутствуют');
   }
-  L.push(`Условия оплаты: ${S.pay==='fact'?'оплата по факту':S.pay==='cp-prepay'?'предоплата со стороны контрагента':`аванс ${r.avans} %`}; источник финансирования — ${ {own:'собственные средства',project:'проектное финансирование',dolevoe:'средства участников долевого строительства'}[S.fin] }`);
+  L.push(`Условия оплаты: ${payName(r)}; источник финансирования — ${FIN_NAME[S.fin]}`);
   L.push(`Инициатор: ${S.initiator||'—'}`);
-  L.push(`Основание проверки: ${ {new:'новый договор',prolong:'продление, дополнительное соглашение',extra:'внеочередная проверка'}[S.reason] }`);
+  L.push(`Основание проверки: ${REASON_NAME[S.reason]}`);
   L.push(`Присвоенный уровень риска: ${LVL_NAME[r.lvl].toLowerCase()}${r.raised?` (повышен комплаенс-менеджером: ${S.lvlWhy||'обоснование не указано'})`:''}`);
   if(r.p53.length) L.push(`Основания углублённого уровня (п. 5.3): ${r.p53.join('; ')}`);
   nl();
@@ -1981,7 +1989,7 @@ function concText(){
   L.push(`Проверенные позиции: ${r.scope.join(', ')}.`);
   r.scope.forEach(n=>{
     const c = S.cl[n]||{}; const it = CHECKLIST.find(x=>x.n===n);
-    const q = {ok:'соответствует',flag:'красный флаг',over:'преодолимый стоп-фактор',abs:'абсолютный стоп-фактор'}[c.q] || 'не заполнено';
+    const q = Q_NAME[c.q] || 'не заполнено';
     L.push(`  ${n}. ${it.t} — ${q}.${(c.note||'').trim()?` ${c.note.trim()}`:''}`);
   });
   if(S.auto && !r.scope.includes(9)){
@@ -2006,7 +2014,7 @@ function concText(){
   L.push(`  ${r.verdictText}. ${r.verdictWhy||''}`);
   nl();
   L.push('5. ОБЯЗАТЕЛЬНЫЕ К ВКЛЮЧЕНИЮ В ДОГОВОР УСЛОВИЯ (МИТИГАЦИЯ)');
-  const chosen = TERMS.map((t,i)=>({t,i})).filter(({i})=> S.terms[i] || (i===0 && r.lvl>=2));
+  const chosen = chosenTerms(r);
   if(chosen.length) chosen.forEach(({t,i},k)=>L.push(`  ${k+1}. ${t}${(S.terms[i+'_v']||'').trim()?`: ${S.terms[i+'_v'].trim()}`:''}`));
   else L.push('  Не требуются.');
   if(r.mit.length){ nl(); L.push('  Рекомендуемые меры по п. 9.3:'); r.mit.forEach(m=>L.push(`  — ${m.t}`)); }
@@ -2047,9 +2055,11 @@ function renderS6(){
       <button class="btn primary" data-act="save-reg">Внести в Реестр контрагентов</button>
       <button class="btn" data-act="dossier">Собрать досье</button>
       <button class="btn" data-act="copy-concl">Копировать текст Заключения</button>
+      <button class="btn" data-act="xlsx-concl">Скачать Excel</button>
       <button class="btn" data-act="doc-concl">Скачать .doc</button>
       <button class="btn ghost" data-act="print">Печать</button>
     </div>
+    <div class="hint">Excel — книга по образцу: листы «Заключение», «Пороговые значения сумм», «Чек лист», «Стоп-факторы», «Реестр» и «Финансы» с формулами по позициям 23–24.</div>
   </div>
 
   <div class="card">
@@ -2057,6 +2067,317 @@ function renderS6(){
     <div class="doc"><pre style="white-space:pre-wrap;font-family:var(--serif);font-size:13.5px;margin:0">${esc(concText())}</pre></div>
   </div>
   <div class="btnrow noprint"><button class="btn ghost" data-go="5">← Митигация</button></div>`;
+}
+
+/* ====================== выгрузка в Excel (.xlsx) ======================
+   Книга повторяет образец комплаенс-менеджера: «Заключение», «Пороговые значения сумм», «Чек лист»,
+   «Стоп-факторы», «Реестр» — и расчётный лист «Финансы» с формулами по позициям 23–24.
+   ExcelJS подгружается с cdnjs при первой выгрузке, как pdf.js при разборе договора. */
+const EXCELJS = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+const XL_FILL = {ok:'FFE2EFDA', flag:'FFFFF2CC', over:'FFFCE4D6', abs:'FFFFC7CE', off:'FFF2F2F2', head:'FFDDEBF7', input:'FFFFFBE6'};
+const XL_GREY = 'FF808080', XL_RED = 'FFC00000';
+/* ссылки листа «Стоп-факторы» — на источник соответствующей позиции чек-листа, как в образце */
+const CRIT_CL = {1:2, 2:3, 3:7, 4:6, 5:13, 6:16, 10:21};
+const FLAG_PB = [1,2,3,4,5,7];
+let xlsxBusy = false;
+
+function regRecord(r){
+  return {
+    cp:S.cp, inn:S.inn, orgName:orgName(), subject:r.subj.t, sum:r.own,
+    contracts: r.contracts.map(c=>`${c.org||'—'}: ${c.what||'—'}, ${money(c.sum)} ₽`).join(' | '),
+    lvl:r.lvl, num:S.num, date:S.date, verdict:r.verdictText,
+    mitig: chosenTerms(r).map(x=>x.t).join('; '),
+    decision: r.needP83 ? (S.decision||'требуется') : '',
+    validUntil: r.validUntil, monitor:'', snapshot: JSON.parse(JSON.stringify(S)),
+  };
+}
+function cap(s){ return s ? s[0].toUpperCase() + s.slice(1) : s; }
+function clLink(n, inn){
+  const i = encodeURIComponent(inn||'');
+  const byInn = inn && {
+    11:['ЕФРСБ по ИНН', `https://bankrot.fedresurs.ru/bankrupts?searchString=${i}`],
+    12:['Федресурс по ИНН', `https://fedresurs.ru/search/entity?code=${i}`],
+    13:['РНП по ИНН', `https://zakupki.gov.ru/epz/dishonestsupplier/search/results.html?searchString=${i}&morphology=on&pageNumber=1&recordsPerPage=_10`],
+  }[n];
+  if(byInn) return {text:byInn[0], hyperlink:byInn[1]};
+  const it = CHECKLIST.find(x=>x.n===n);
+  return it && it.u ? {text:it.u.replace(/^https:\/\/(www\.)?/,'').replace(/\/$/,''), hyperlink:it.u} : '';
+}
+/* формула с готовым результатом: Excel всё равно пересчитает книгу при открытии */
+function fx(formula, result){ return {formula, result: (result===null || result===undefined || Number.isNaN(result)) ? undefined : result}; }
+
+function xlBook(){
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Комплаенс-проверка контрагента'; wb.created = new Date();
+  wb.calcProperties = {fullCalcOnLoad:true};
+  return wb;
+}
+function xlSheet(wb, name, widths, landscape){
+  const ws = wb.addWorksheet(name, {pageSetup:{paperSize:9, orientation:landscape?'landscape':'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0,
+    margins:{left:0.5, right:0.4, top:0.6, bottom:0.6, header:0.3, footer:0.3}}});
+  widths.forEach((w,i)=>{ ws.getColumn(i+1).width = w; });
+  ws.kpkW = widths;
+  return ws;
+}
+/* Строка таблицы: cells — [{v, span, b, i, sz, h, fill, color, fmt}] слева направо с колонки o.start.
+   Высоту считаем по длине текста сами: для объединённых ячеек Excel её не подбирает. */
+function xlRow(ws, n, cells, o={}){
+  const row = ws.getRow(n);
+  let col = o.start||1, height = o.minH||15;
+  cells.forEach(c=>{
+    const span = c.span||1;
+    if(span>1) ws.mergeCells(n, col, n, col+span-1);
+    const v = (c.v===undefined || c.v==='') ? null : c.v;
+    row.getCell(col).value = v;
+    const link = v && typeof v==='object' && v.hyperlink;
+    const font = {name:'Times New Roman', size:c.sz||o.sz||10.5, bold:!!(c.b||o.b), italic:!!c.i};
+    if(link){ font.color = {argb:'FF0563C1'}; font.underline = true; }
+    else if(c.color) font.color = {argb:c.color};
+    const line = {style:'thin', color:{argb:'FF8C8C8C'}};
+    const fill = c.fill || o.fill;
+    for(let k=0; k<span; k++){
+      const x = row.getCell(col+k);
+      x.font = font;
+      x.alignment = {vertical:'middle', horizontal:c.h||o.h||'left', wrapText:true};
+      if(o.bd) x.border = {top:line, left:line, bottom:line, right:line};
+      if(fill) x.fill = {type:'pattern', pattern:'solid', fgColor:{argb:fill}};
+      if(c.fmt) x.numFmt = c.fmt;
+    }
+    const w = ws.kpkW.slice(col-1, col-1+span).reduce((a,b)=>a+b, 0);
+    const text = v===null ? '' : typeof v==='object' ? String(v.text||'') : String(v);
+    const per = Math.max(4, Math.floor(w*1.15*10.5/font.size) - 1);
+    const lines = text.split('\n').reduce((a,p)=>a + Math.max(1, Math.ceil(p.length/per)), 0);
+    height = Math.max(height, Math.ceil(lines*font.size*1.3 + 4));
+    col += span;
+  });
+  row.height = height;
+  return row;
+}
+
+function xlsConclusion(wb, r){
+  const o = r.org;
+  const ws = xlSheet(wb, 'Заключение', [2.7, 46, 74]);
+  xlRow(ws, 1, [{v:'ЗАКЛЮЧЕНИЕ КОМПЛАЕНС-МЕНЕДЖЕРА ПО РЕЗУЛЬТАТАМ ПРОВЕРКИ КОНТРАГЕНТА', span:2, b:true, sz:12, h:'center'}], {start:2, minH:22});
+  xlRow(ws, 2, [{v:'Приложение № 7 к Регламенту о порядке проведения комплаенс-проверки контрагентов', span:2, i:true, sz:9, h:'center'}], {start:2});
+  let deal = `${r.subj.t}${S.dogovor?` (договор ${S.dogovor})`:''}; ${money(r.own)} ₽ с НДС`;
+  if(S.hasContracts==='yes' && r.contracts.length){
+    deal += `\nДействующие договоры с контрагентом (по сведениям инициатора), всего на ${money(r.contractsTotal)} ₽:\n` +
+      r.contracts.map((c,i)=>`${i+1}) ${c.org||'организация не указана'} — ${c.what||'реквизиты не указаны'}; ${money(c.sum)} ₽${c.linked?'; взаимосвязан с новой сделкой':''}`).join('\n');
+    if(r.linked) deal += `\nСумма для определения порога и уровня (п. 4.4): ${money(r.sum)} ₽`;
+  } else if(S.hasContracts==='no') deal += '\nДействующих договоров с контрагентом нет (по сведениям инициатора)';
+  const lvl = [`${LVL_NAME[r.lvl]}${r.raised?` — повышен комплаенс-менеджером: ${S.lvlWhy||'обоснование не указано'}`:''}.`]
+    .concat(r.parts.map(p=>`${p.k}: ${LVL_NAME[p.v].toLowerCase()} — ${p.note}`), r.forced,
+            r.p53.length ? [`Основания углублённого уровня (п. 5.3): ${r.p53.join('; ')}`] : []).join('\n');
+  const c27 = (S.cl[27] && (S.cl[27].note||'').trim()) || '';
+  const target = c27 || (r.scope.includes(27) ? 'не заполнено (поз. 27 чек-листа)' : 'оценивается на углублённом уровне (поз. 27 чек-листа)');
+  const head = [
+    ['Номер и дата Заключения', `${S.num||'б/н'} от ${rus(S.date)}`],
+    ['Организация Группы (в интересах которой проводится проверка)', `${orgName()}${o.inn?`, ИНН ${o.inn}`:''}`],
+    ['Порог проверки и границы уровней риска для данной организации (Приложение № 2)', `Проверка не проводится — до ${money(o.porog)} ₽; базовый уровень — до ${money(o.base)} ₽; стандартный — до ${money(o.std)} ₽; свыше — углублённый${o.prikaz?`. Приказ ${o.prikaz}`:''}`],
+    ['Контрагент (наименование)', `${S.cp||'—'}${S.ogrn?`, ОГРН ${S.ogrn}`:''}`],
+    ['ИНН контрагента', S.inn||'—'],
+    ['Предмет и сумма договора (с НДС)', deal],
+    ['Условия оплаты (аванс, %), источник финансирования', `${cap(payName(r))}; ${FIN_NAME[S.fin]}`],
+    ['Инициатор (Ф.И.О., должность, подразделение)', S.initiator||'—'],
+    ['Основание проверки (новый договор / продление / внеочередная)', cap(REASON_NAME[S.reason])],
+    ['Присвоенный уровень риска и его обоснование', lvl],
+    ['Источник финансирования (проектное финансирование, собственные средства); соответствие целевому назначению', `${cap(FIN_NAME[S.fin])}. Соответствие целевому назначению: ${target}`],
+  ];
+  let n = 3;
+  head.forEach(([k,v])=>xlRow(ws, n++, [{v:k},{v}], {start:2, bd:true}));
+  n++;
+  xlRow(ws, n++, [{v:'Результаты проверки', span:2, b:true, fill:XL_FILL.head}], {start:2, bd:true});
+  const found = [].concat(
+    r.abs.map(x=>`Абсолютный стоп-фактор — ${x.t} (${x.src}).${x.why?` ${x.why}`:''}`),
+    r.over.map(x=>`Преодолимый стоп-фактор — ${x.t} (${x.src}).${x.why?` ${x.why}`:''}`),
+    r.flag.map(x=>`Красный флаг — ${x.t} (${x.src}).${x.why?` ${x.why}`:''}`));
+  const vFill = {ok:XL_FILL.ok, cond:XL_FILL.flag, neg:XL_FILL.abs, skip:XL_FILL.off, draft:XL_FILL.off}[r.verdict];
+  const res = [
+    ['Проверенные позиции чек-листа (Приложение № 5)', `${r.scope.length} из 28, ${LVL_NAME[r.lvl].toLowerCase()} уровень; заполнено ${r.done}. Подробно — лист «Чек лист».`],
+    ['Профильные мнения подразделений', r.need.length ? r.need.map(x=>`${x.d} — обязательно (${x.why}), срок ${r.opinion}. Запрошено ________, получено ________`).join('\n') : 'Обязательное привлечение не требуется'],
+    ['Стоп-факторы и красные флаги (Приложение № 6)', (found.length ? found.join('\n') : 'Не выявлены.') + '\nПодробно — лист «Стоп-факторы».'],
+    ['Вывод', `${r.verdictText}. ${r.verdictWhy||r.skipWhy||''}`.trim(), vFill],
+    ['Обязательные к включению в договор условия', chosenTerms(r).map(({t,i},k)=>`${k+1}. ${t}${(S.terms[i+'_v']||'').trim()?`: ${S.terms[i+'_v'].trim()}`:''}`).join('\n') || 'Не требуются'],
+    ['Рекомендуемые меры снижения риска (п. 9.3)', r.mit.map(m=>`— ${m.t}`).join('\n') || 'Не требуются'],
+    ['Срок действия Заключения', `до ${rus(r.validUntil)} (${r.valid} мес., п. 9.4)`],
+  ];
+  if(r.needP83) res.push(['Решение уполномоченного лица (п. 8.3)', (S.decision||'____________________') + (r.needPartner ? '\nТребуется дополнительное согласование управляющего партнёра Группы.' : '') + '\nКопия решения направляется управляющему партнёру Группы в течение 1 рабочего дня.']);
+  res.push(['Комплаенс-менеджер', `${S.km||'____________________'}    Дата: ${rus(S.date)}    Подпись: ____________`]);
+  res.forEach(([k,v,f])=>xlRow(ws, n++, [{v:k, b:k==='Вывод'},{v, fill:f, b:k==='Вывод'}], {start:2, bd:true}));
+}
+
+function xlsOrgs(wb){
+  const ws = xlSheet(wb, 'Пороговые значения сумм', [4, 26, 12, 20, 14, 14, 14, 16, 24], true);
+  xlRow(ws, 1, [{v:'ПОРОГОВЫЕ ЗНАЧЕНИЯ СУММ (Приложение № 2)', span:9, b:true, sz:12, h:'center'}], {minH:22});
+  xlRow(ws, 2, [{v:'Выделена организация Группы, в интересах которой проводится проверка.', span:9, i:true, sz:9}]);
+  xlRow(ws, 3, ['№','Организация Группы','ИНН','Роль в Группе','Проверка не проводится, руб.','Базовый уровень до, руб.','Стандартный уровень до, руб.','Порог налоговой задолженности, руб.','Реквизиты приказа']
+    .map(v=>({v, h:'center'})), {bd:true, b:true, sz:9, fill:XL_FILL.head});
+  if(!ORGS.length) xlRow(ws, 4, [{v:'Справочник порогов не заполнен — вкладка «Настройки».', span:9, i:true}], {bd:true, sz:9});
+  ORGS.forEach((o,i)=>{
+    const num = x => ({v:Number(x)||0, fmt:'#,##0', h:'center'});
+    xlRow(ws, 4+i, [{v:i+1, h:'center'}, {v:o.name}, {v:o.inn, h:'center'}, {v:o.role}, num(o.porog), num(o.base), num(o.std), num(o.taxDebt), {v:o.prikaz}],
+      {bd:true, sz:9, b:o.id==S.org, fill:o.id==S.org ? XL_FILL.flag : null});
+  });
+}
+
+function xlsChecklist(wb, r){
+  const ws = xlSheet(wb, 'Чек лист', [4, 46, 26, 17, 66, 22], true);
+  xlRow(ws, 1, [{v:'ЧЕК-ЛИСТ КОМПЛАЕНС-ПРОВЕРКИ КОНТРАГЕНТА', span:6, b:true, sz:12, h:'center'}], {minH:22});
+  let n = 3;
+  const info = [['Контрагент', S.cp||'—'], ['ИНН', S.inn||'—'], ['Организация группы:', orgName()],
+    ['Уровень риска', `${LVL_NAME[r.lvl]} — проверяются позиции ${r.scope.length} из 28 (Приложение № 1)`]];
+  if(S.auto) info.push(['Автопроверка', `${stamp(S.auto.at)}, ИНН ${S.auto.inn}${S.auto.inn!==digits(S.inn)?' — по другому ИНН, результаты не относятся к контрагенту':''}`]);
+  info.forEach(([k,v])=>xlRow(ws, n++, [{v:k},{v:String(v), span:4}], {start:2, bd:true}));
+  const section = (title, part)=>{
+    n++;
+    xlRow(ws, n++, [{v:title, span:6, b:true, fill:XL_FILL.head}], {bd:true});
+    xlRow(ws, n++, ['№', part===1?'Наименование':'Что проверяется', 'Источник', 'Результат', 'Примечание: фактические показатели, дата и источник выгрузки', 'Ссылка на источник']
+      .map(v=>({v, h:'center'})), {bd:true, b:true, sz:9.5});
+    CHECKLIST.filter(x=>x.p===part).forEach(it=>{
+      const inS = r.scope.includes(it.n), c = S.cl[it.n] || {}, note = (c.note||'').trim();
+      const result = inS ? (c.q ? cap(Q_NAME[c.q]) : 'не заполнено') : 'не проверяется';
+      let text = inS ? note : `Не входит в ${LVL_NAME[r.lvl].toLowerCase()} уровень (Приложение № 1).${note?` ${note}`:''}`;
+      if(it.n===23 || it.n===24) text = (text ? text + '\n' : '') + 'Расчёт по формулам — лист «Финансы».';
+      const fill = inS ? (c.q ? XL_FILL[c.q] : null) : XL_FILL.off, grey = inS ? null : XL_GREY;
+      xlRow(ws, n++, [{v:it.n, h:'center', color:grey}, {v:it.t, color:grey}, {v:it.s, color:grey},
+        {v:result, h:'center', b:inS && !!c.q && c.q!=='ok', color:inS && !c.q ? XL_RED : grey}, {v:text, sz:9.5, color:grey}, {v:clLink(it.n, S.inn), sz:9.5}],
+        {bd:true, sz:9.5, fill});
+    });
+  };
+  section('Правоспособность, репутация, правовые риски', 1);
+  section('Налоговые и финансовые риски, ресурсы', 2);
+  n += 2;
+  xlRow(ws, n++, [{v:'Проверку провёл: комплаенс-менеджер'}, {v:S.km||'Ф.И.О.'}, {v:rus(S.date), h:'center'}, {v:'Подпись: ______________'}], {start:2});
+  n++;
+  xlRow(ws, n++, [{v:'Запрошены профильные мнения (указать подразделения и даты)'},
+    {v:r.need.length ? r.need.map(x=>`${x.d} — ${x.why}; запрошено ________, получено ________`).join('\n') : 'Обязательное привлечение не требуется', span:4}], {start:2, bd:true});
+  ws.pageSetup.printTitlesRow = '1:1';
+}
+
+function xlsStops(wb, r){
+  const ws = xlSheet(wb, 'Стоп-факторы', [4, 62, 9, 24, 60, 22], true);
+  xlRow(ws, 1, [{v:'ПЕРЕЧЕНЬ СТОП-ФАКТОРОВ И КРАСНЫХ ФЛАГОВ', span:6, b:true, sz:12, h:'center'}], {minH:22});
+  let n = 3;
+  xlRow(ws, n++, [{v:'1. Критические факторы (Приложение № 6, раздел 1). При отсутствии прямого правового запрета приоритет — квалификация как красного флага или преодолимого стоп-фактора с митигацией.', span:6, b:true, fill:XL_FILL.head}], {bd:true});
+  xlRow(ws, n++, ['№','Фактор','Да/Нет','Квалификация','Конкретное основание и мотивировка категории','Источник'].map(v=>({v, h:'center'})), {bd:true, b:true, sz:10});
+  CRIT.forEach(c=>{
+    const q = S.crit[c.n] || 'no', yes = q!=='no';
+    xlRow(ws, n++, [{v:c.n, h:'center'}, {v:c.t}, {v:yes?'Да':'Нет', h:'center', b:yes}, {v:yes?cap(Q_NAME[q]):'не выявлено', h:'center'},
+      {v:S.crit[c.n+'_why']||'', sz:9.5}, {v:CRIT_CL[c.n] ? clLink(CRIT_CL[c.n], S.inn) : '', sz:9.5}],
+      {bd:true, fill:yes ? XL_FILL[q] : null});
+  });
+  n++;
+  xlRow(ws, n++, [{v:'2. Красные флаги (Приложение № 6, раздел 2) — требуют дополнительной проверки и мер митигации (п. 9.3)', span:6, b:true, fill:XL_FILL.head}], {bd:true});
+  xlRow(ws, n++, [{v:'№', h:'center'}, {v:'Признак', h:'center'}, {v:'Да/Нет', h:'center'}, {v:'Обоснование', span:2, h:'center'}, {v:'Источник', h:'center'}], {bd:true, b:true, sz:10});
+  FLAGS.forEach(f=>{
+    const yes = (S.flags||[]).includes(f.n);
+    xlRow(ws, n++, [{v:f.n, h:'center'}, {v:f.t}, {v:yes?'Да':'Нет', h:'center', b:yes},
+      {v:(yes && S.flagWhy && S.flagWhy[f.n]) || '', span:2, sz:9.5}, {v:FLAG_PB.includes(f.n) ? {text:'pb.nalog.ru', hyperlink:'https://pb.nalog.ru/'} : '', sz:9.5}],
+      {bd:true, fill:yes ? XL_FILL.flag : null});
+  });
+  n++;
+  xlRow(ws, n++, [{v:`Отмечено красных флагов: ${(S.flags||[]).length} из 15. Два и более флага переводят проверку на углублённый уровень (п. 5.3).`, span:6, i:true}]);
+}
+
+function xlsRegistry(wb, list){
+  const ws = xlSheet(wb, 'Реестр', [5, 24, 13, 24, 30, 13, 17, 26, 40, 26, 12, 12], true);
+  xlRow(ws, 1, [{v:'РЕЕСТР КОМПЛАЕНС-ПРОВЕРОК КОНТРАГЕНТОВ (Приложение № 8)', span:12, b:true, sz:12, h:'center'}], {minH:22});
+  xlRow(ws, 3, ['№','Контрагент','ИНН','Организация Группы','Предмет и сумма договора','Уровень риска','№ и дата Заключения','Вывод','Меры митигации','Решение по п. 8.3','Срок действия','Дата мониторинга']
+    .map(v=>({v, h:'center'})), {bd:true, b:true, sz:9, fill:XL_FILL.head});
+  ws.views = [{state:'frozen', ySplit:3}];
+  if(!list.length) xlRow(ws, 4, [{v:'Записей нет.', span:12, i:true}], {bd:true, sz:9});
+  list.forEach((x,i)=>{
+    const exp = x.validUntil && x.validUntil < today();
+    xlRow(ws, 4+i, [{v:i+1, h:'center'}, {v:x.cp}, {v:x.inn, h:'center'}, {v:x.orgName}, {v:`${x.subject}; ${money(x.sum)} ₽`},
+      {v:LVL_NAME[x.lvl]||'', h:'center'}, {v:`${x.num||'б/н'} от ${rus(x.date)}`, h:'center'}, {v:x.verdict}, {v:x.mitig||'—'}, {v:x.decision||'—'},
+      {v:rus(x.validUntil) + (exp?' — истёк':''), h:'center', color:exp?XL_RED:null, b:exp}, {v:x.monitor?rus(x.monitor):'—', h:'center'}], {bd:true, sz:9});
+  });
+}
+
+/* Лист «Финансы» — таблица и формулы по позициям 23–24 (и 22 — налоговая нагрузка).
+   Значения из автопроверки — в жёлтых ячейках: их можно поправить вручную, формулы пересчитаются. */
+function xlsFinance(wb, r){
+  const ws = xlSheet(wb, 'Финансы', [54, 17, 17, 17, 13]);
+  const a = S.auto && S.auto.inn === digits(S.inn) ? S.auto : null, b = a && a.bo, p = a && a.pb;
+  const y = b && b.year ? b.year : null;
+  const val = v => (v===null || v===undefined) ? null : Number(v);
+  const inp = (v, fmt) => ({v:val(v), fmt:fmt||'#,##0', fill:XL_FILL.input, h:'right'});
+  const pct = '0.0%';
+  xlRow(ws, 1, [{v:'ФИНАНСОВЫЕ ПОКАЗАТЕЛИ КОНТРАГЕНТА (позиции 23–24 чек-листа)', span:5, b:true, sz:12, h:'center'}], {minH:22});
+  xlRow(ws, 2, [{v:`${S.cp||'Контрагент'}, ИНН ${S.inn||'—'}. ${b?`ГИР БО (bo.nalog.gov.ru), отчётность за ${b.year} год`:'Данных ГИР БО нет — внесите показатели вручную'}${p?'; «Прозрачный бизнес» (pb.nalog.ru)':''}${a?`; автопроверка ${stamp(a.at)}`:''}. Жёлтые ячейки можно править — формулы пересчитаются.`, span:5, i:true, sz:9}]);
+  let n = 4;
+  xlRow(ws, n++, ['Бухгалтерская отчётность, ₽', y?`${y} год`:'Отчётный год', y?`${y-1} год`:'Предыдущий год', 'Изменение, ₽', 'Изменение, %'].map(v=>({v, h:'center'})), {bd:true, b:true, fill:XL_FILL.head});
+  const R = {};
+  [['Выручка','revenue','revenuePrev'], ['Чистая прибыль (убыток)','profit','profitPrev'], ['Активы (баланс)','assets','assetsPrev'],
+   ['Капитал и резервы','net','netPrev'], ['Дебиторская задолженность','receivables',null], ['Кредиторская задолженность','payables','payablesPrev'],
+   ['Заёмные средства, краткосрочные','loansShort',null], ['Заёмные средства, долгосрочные','loansLong',null]].forEach(([t,k,kp])=>{
+    const cur = b ? val(b[k]) : null, prev = b && kp ? val(b[kp]) : null;
+    R[k] = n;
+    xlRow(ws, n, [{v:t}, inp(cur), kp ? inp(prev) : {v:null, fill:XL_FILL.off},
+      kp ? {v:fx(`IF(OR(B${n}="",C${n}=""),"",B${n}-C${n})`, cur!==null && prev!==null ? cur-prev : null), fmt:'#,##0'} : {v:null, fill:XL_FILL.off},
+      kp ? {v:fx(`IF(OR(B${n}="",C${n}="",C${n}=0),"",(B${n}-C${n})/ABS(C${n}))`, cur!==null && prev ? (cur-prev)/Math.abs(prev) : null), fmt:pct} : {v:null, fill:XL_FILL.off}], {bd:true});
+    n++;
+  });
+  n++;
+  xlRow(ws, n++, ['Доходы и расходы («Прозрачный бизнес»), ₽', 'Доходы', 'Расходы', 'Разница', 'Расходы / доходы'].map(v=>({v, h:'center'})), {bd:true, b:true, fill:XL_FILL.head});
+  const fin = p && p.fin.length ? p.fin : [{}, {}, {}];
+  const pbFirst = n;
+  fin.forEach(f=>{
+    const rv = f.year ? f.revenue : null, ex = f.year ? f.expense : null;
+    xlRow(ws, n, [{v:f.year ? `${f.year} год` : 'Год ______'}, inp(rv), inp(ex),
+      {v:fx(`IF(OR(B${n}="",C${n}=""),"",B${n}-C${n})`, rv!==null && ex!==null ? rv-ex : null), fmt:'#,##0'},
+      {v:fx(`IF(N(B${n})>0,C${n}/B${n},"")`, rv ? ex/rv : null), fmt:pct}], {bd:true});
+    n++;
+  });
+  n++;
+  xlRow(ws, n++, [{v:'Показатели для оценки', h:'center'}, {v:'Значение', h:'center'}, {v:'Как считается', span:3, h:'center'}], {bd:true, b:true, fill:XL_FILL.head});
+  const B = k => `B${R[k]}`, bv = k => b ? val(b[k]) : null;
+  const sumRow = n, taxRow = n + 7, staffRow = n + 9;
+  const rev = bv('revenue'), ast = bv('assets'), loans = (bv('loansShort')||0) + (bv('loansLong')||0);
+  const pbRev = p && p.fin[0] ? p.fin[0].revenue : null, taxes = p ? p.taxes : null, staff = p && p.staff !== null ? p.staff : null;
+  const ind = [
+    ['Сумма сделки с НДС, ₽ (с учётом взаимосвязанных договоров, п. 4.4)', inp(r.sum), 'Из Заключения; можно поменять'],
+    ['Сумма сделки / выручка', {v:fx(`IF(N(${B('revenue')})>0,B${sumRow}/${B('revenue')},"")`, rev ? r.sum/rev : null), fmt:pct}, 'Поз. 24; Приложение № 6, п. 12'],
+    ['Сумма сделки / активы', {v:fx(`IF(N(${B('assets')})>0,B${sumRow}/${B('assets')},"")`, ast ? r.sum/ast : null), fmt:pct}, 'Поз. 24; Приложение № 6, п. 12'],
+    ['Чистая прибыль / выручка', {v:fx(`IF(N(${B('revenue')})>0,${B('profit')}/${B('revenue')},"")`, rev && bv('profit')!==null ? bv('profit')/rev : null), fmt:pct}, 'Поз. 23; красный флаг 7'],
+    ['Заёмные средства / активы', {v:fx(`IF(N(${B('assets')})>0,(N(${B('loansShort')})+N(${B('loansLong')}))/${B('assets')},"")`, ast ? loans/ast : null), fmt:pct}, 'Поз. 23'],
+    ['Капитал и резервы отрицательные', {v:fx(`IF(${B('net')}="","",IF(${B('net')}<0,"да","нет"))`, bv('net')===null ? null : (bv('net')<0?'да':'нет')), h:'center'}, 'Поз. 23; красный флаг 7'],
+    ['Рост кредиторской задолженности за год', {v:fx(`E${R.payables}`, bv('payables')!==null && bv('payablesPrev') ? (bv('payables')-bv('payablesPrev'))/Math.abs(bv('payablesPrev')) : null), fmt:pct}, 'Поз. 23; красный флаг 7'],
+    [`Уплачено налогов и взносов${p && p.taxesYear ? ` за ${p.taxesYear} год` : ''}, ₽`, inp(taxes), '«Прозрачный бизнес»'],
+    ['Налоговая нагрузка: налоги / доходы', {v:fx(`IF(N(B${pbFirst})>0,B${taxRow}/B${pbFirst},"")`, pbRev && taxes!==null ? taxes/pbRev : null), fmt:'0.00%'}, `Поз. 22; красный флаг 9. Доходы — первая строка таблицы выше`],
+    [`Среднесписочная численность${p && p.staffYear ? ` за ${p.staffYear} год` : ''}, чел.`, inp(staff, '0'), '«Прозрачный бизнес»; красный флаг 2'],
+    ['Сумма сделки на одного работника, ₽', {v:fx(`IF(N(B${staffRow})>0,B${sumRow}/B${staffRow},"")`, staff ? r.sum/staff : null), fmt:'#,##0'}, 'Поз. 25'],
+  ];
+  ind.forEach(([t, cell, how])=>xlRow(ws, n++, [{v:t}, Object.assign({h:'right'}, cell), {v:how, span:3, sz:9.5}], {bd:true}));
+  n++;
+  xlRow(ws, n, [{v:'Формулы только считают соотношения. Красный флаг или стоп-фактор по ним определяет комплаенс-менеджер с обоснованием (Приложение № 5, Приложение № 6).', span:5, i:true, sz:9.5}]);
+}
+
+function xlsxConclusion(){
+  const r = calc(), wb = xlBook();
+  xlsConclusion(wb, r);
+  xlsOrgs(wb);
+  xlsChecklist(wb, r);
+  xlsStops(wb, r);
+  xlsRegistry(wb, [REG.find(x=>S.num && x.num===S.num && x.inn===S.inn) || regRecord(r)]);
+  xlsFinance(wb, r);
+  return wb;
+}
+function xlsxRegistry(){ const wb = xlBook(); xlsRegistry(wb, REG); return wb; }
+function downloadBlob(name, blob){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 400);
+}
+async function xlsxSave(name, build){
+  if(xlsxBusy) return;
+  xlsxBusy = true;
+  try{
+    if(!window.ExcelJS){ toast('Загружаю модуль Excel…'); await loadScript(EXCELJS, 'модуль Excel'); }
+    const buf = await build().xlsx.writeBuffer();
+    downloadBlob(name, new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  }catch(e){ toast('Excel не собран: ' + ((e && e.message) || e)); }
+  xlsxBusy = false;
 }
 
 /* ====================== боковая сводка ====================== */
@@ -2119,6 +2440,7 @@ function renderRegistry(){
       <tbody>${rows || '<tr><td colspan="13" class="muted">Записей нет.</td></tr>'}</tbody>
     </table></div>
     <div class="btnrow">
+      <button class="btn" data-act="xlsx-reg">Скачать Excel</button>
       <button class="btn" data-act="csv">Скачать CSV</button>
       <button class="btn" data-act="copy-csv">Копировать CSV</button>
       <button class="btn ghost" data-act="export-reg">Выгрузить JSON</button>
@@ -2434,9 +2756,12 @@ document.addEventListener('click', e=>{
     files.push([`4_Данные-проверки_${nm}_${S.date}.json`, JSON.stringify(S,null,2)]);
     files.forEach((f,i)=>setTimeout(()=>download(f[0], f[1], f[0].endsWith('.json')?'application/json':'application/msword'), i*450));
     if(egrulPdf && egrulPdfInn === digits(S.inn)){ files.push(['выписка']); setTimeout(()=>downloadB64(`0_Выписка-ЕГРЮЛ_${nm}_${S.date}.pdf`, egrulPdf, 'application/pdf'), files.length*450); }
+    if(!r.skip){ files.push(['excel']); setTimeout(()=>xlsxSave(`1_Заключение_${nm}_${S.date}.xlsx`, xlsxConclusion), files.length*450); }
     toast(`Файлов в досье: ${files.length}. Если браузер спросит про несколько загрузок — разрешите`);
     return;
   }
+  if(a==='xlsx-concl'){ xlsxSave(`Заключение_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${S.date}.xlsx`, xlsxConclusion); return; }
+  if(a==='xlsx-reg'){ xlsxSave('Реестр-комплаенс-проверок.xlsx', xlsxRegistry); return; }
   if(a==='doc-concl'){
     const html = `<html><head><meta charset="utf-8"></head><body style="font-family:Times New Roman,serif;font-size:12pt"><pre style="white-space:pre-wrap;font-family:Times New Roman,serif">${esc(concText())}</pre></body></html>`;
     download(`Заключение_${(S.cp||'контрагент').replace(/[^\wа-яА-ЯёЁ]+/g,'-')}_${S.date}.doc`, html, 'application/msword');
@@ -2444,14 +2769,7 @@ document.addEventListener('click', e=>{
   }
   if(a==='save-reg'){
     if(!S.cp){ toast('Не указан контрагент'); return; }
-    const rec = {
-      cp:S.cp, inn:S.inn, orgName:orgName(), subject:r.subj.t, sum:r.own,
-      contracts: r.contracts.map(c=>`${c.org||'—'}: ${c.what||'—'}, ${money(c.sum)} ₽`).join(' | '),
-      lvl:r.lvl, num:S.num, date:S.date, verdict:r.verdictText,
-      mitig: TERMS.map((tt,i)=> (S.terms[i]||(i===0&&r.lvl>=2)) ? tt : null).filter(Boolean).join('; '),
-      decision: r.needP83 ? (S.decision||'требуется') : '',
-      validUntil: r.validUntil, monitor:'', snapshot: JSON.parse(JSON.stringify(S)),
-    };
+    const rec = regRecord(r);
     const ix = REG.findIndex(x=>x.inn===rec.inn && x.num===rec.num && rec.num);
     if(ix>=0) REG[ix] = rec; else REG.unshift(rec);
     save(LS.reg,REG); toast('Внесено в Реестр контрагентов'); return;
